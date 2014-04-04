@@ -90,10 +90,11 @@ enum btrfs_send_cmd {
 	BTRFS_SEND_C_FALLOCATE		= 23,
 	BTRFS_SEND_C_FILEATTR		= 24,
 	BTRFS_SEND_C_ENCODED_WRITE	= 25,
-	BTRFS_SEND_C_MAX_V2		= 25,
+	BTRFS_SEND_C_TOTAL_DATA_SIZE	= 26,
+	BTRFS_SEND_C_MAX_V2		= 26,
 
 	/* End */
-	BTRFS_SEND_C_MAX		= 25,
+	BTRFS_SEND_C_MAX		= 26,
 };
 
 /* attributes in send stream */

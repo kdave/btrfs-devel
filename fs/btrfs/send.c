@@ -76,7 +76,13 @@ struct clone_root {
 #define SEND_CTX_MAX_NAME_CACHE_SIZE 128
 #define SEND_CTX_NAME_CACHE_CLEAN_SIZE (SEND_CTX_MAX_NAME_CACHE_SIZE * 2)
 
+enum btrfs_send_phase {
+	SEND_PHASE_STREAM_CHANGES,
+	SEND_PHASE_CALCULATE_DATA_SIZE,
+};
+
 struct send_ctx {
+	enum btrfs_send_phase phase;
 	struct file *send_filp;
 	loff_t send_off;
 	char *send_buf;
@@ -128,6 +134,7 @@ struct send_ctx {
 	bool ignore_cur_inode;
 
 	u64 send_progress;
+	u64 total_data_size;
 
 	struct list_head new_refs;
 	struct list_head deleted_refs;
@@ -750,6 +757,8 @@ static int send_rename(struct send_ctx *sctx,
 	struct btrfs_fs_info *fs_info = sctx->send_root->fs_info;
 	int ret;
 
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
+
 	btrfs_debug(fs_info, "send_rename %s -> %s", from->start, to->start);
 
 	ret = begin_cmd(sctx, BTRFS_SEND_C_RENAME);
@@ -775,6 +784,8 @@ static int send_link(struct send_ctx *sctx,
 	struct btrfs_fs_info *fs_info = sctx->send_root->fs_info;
 	int ret;
 
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
+
 	btrfs_debug(fs_info, "send_link %s -> %s", path->start, lnk->start);
 
 	ret = begin_cmd(sctx, BTRFS_SEND_C_LINK);
@@ -799,6 +810,8 @@ static int send_unlink(struct send_ctx *sctx, struct fs_path *path)
 	struct btrfs_fs_info *fs_info = sctx->send_root->fs_info;
 	int ret;
 
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
+
 	btrfs_debug(fs_info, "send_unlink %s", path->start);
 
 	ret = begin_cmd(sctx, BTRFS_SEND_C_UNLINK);
@@ -821,6 +834,8 @@ static int send_rmdir(struct send_ctx *sctx, struct fs_path *path)
 {
 	struct btrfs_fs_info *fs_info = sctx->send_root->fs_info;
 	int ret;
+
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
 
 	btrfs_debug(fs_info, "send_rmdir %s", path->start);
 
@@ -2449,6 +2464,9 @@ static int send_truncate(struct send_ctx *sctx, u64 ino, u64 gen, u64 size)
 	int ret = 0;
 	struct fs_path *p;
 
+	if (sctx->phase == SEND_PHASE_CALCULATE_DATA_SIZE)
+		return 0;
+
 	btrfs_debug(fs_info, "send_truncate %llu size=%llu", ino, size);
 
 	p = fs_path_alloc();
@@ -2478,6 +2496,8 @@ static int send_chmod(struct send_ctx *sctx, u64 ino, u64 gen, u64 mode)
 	struct btrfs_fs_info *fs_info = sctx->send_root->fs_info;
 	int ret = 0;
 	struct fs_path *p;
+
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
 
 	btrfs_debug(fs_info, "send_chmod %llu mode=%llu", ino, mode);
 
@@ -2542,6 +2562,8 @@ static int send_chown(struct send_ctx *sctx, u64 ino, u64 gen, u64 uid, u64 gid)
 	int ret = 0;
 	struct fs_path *p;
 
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
+
 	btrfs_debug(fs_info, "send_chown %llu uid=%llu, gid=%llu",
 		    ino, uid, gid);
 
@@ -2578,6 +2600,8 @@ static int send_utimes(struct send_ctx *sctx, u64 ino, u64 gen)
 	struct extent_buffer *eb;
 	struct btrfs_key key;
 	int slot;
+
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
 
 	btrfs_debug(fs_info, "send_utimes %llu", ino);
 
@@ -2641,6 +2665,8 @@ static int send_create_inode(struct send_ctx *sctx, u64 ino)
 	u64 gen;
 	u64 mode;
 	u64 rdev;
+
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
 
 	btrfs_debug(fs_info, "send_create_inode %llu", ino);
 
@@ -2771,6 +2797,8 @@ static int send_create_inode_if_needed(struct send_ctx *sctx)
 {
 	int ret;
 
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
+
 	if (S_ISDIR(sctx->cur_inode_mode)) {
 		ret = did_create_dir(sctx, sctx->cur_ino);
 		if (ret < 0)
@@ -2863,6 +2891,8 @@ static int orphanize_inode(struct send_ctx *sctx, u64 ino, u64 gen,
 {
 	int ret;
 	struct fs_path *orphan;
+
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
 
 	orphan = fs_path_alloc();
 	if (!orphan)
@@ -3247,6 +3277,8 @@ static int apply_dir_move(struct send_ctx *sctx, struct pending_dir_move *pm)
 	bool is_orphan;
 	int ret;
 
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
+
 	name = fs_path_alloc();
 	from_path = fs_path_alloc();
 	if (!name || !from_path) {
@@ -3410,6 +3442,9 @@ static int apply_children_dir_moves(struct send_ctx *sctx)
 	u64 parent_ino = sctx->cur_ino;
 	int ret = 0;
 
+	if (sctx->phase == SEND_PHASE_CALCULATE_DATA_SIZE)
+		return 0;
+
 	pm = get_pending_dir_moves(sctx, parent_ino);
 	if (!pm)
 		return 0;
@@ -3490,6 +3525,8 @@ static int wait_for_dest_dir_move(struct send_ctx *sctx,
 
 	if (RB_EMPTY_ROOT(&sctx->waiting_dir_moves))
 		return 0;
+
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
 
 	path = alloc_path_for_send();
 	if (!path)
@@ -4357,6 +4394,8 @@ static int record_ref(struct btrfs_root *root, u64 dir, struct fs_path *name,
 	struct fs_path *p;
 	u64 gen;
 
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
+
 	p = fs_path_alloc();
 	if (!p)
 		return -ENOMEM;
@@ -4563,6 +4602,8 @@ static int process_all_refs(struct send_ctx *sctx,
 	struct btrfs_key found_key;
 	iterate_inode_ref_t cb;
 	int pending_move = 0;
+
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
 
 	path = alloc_path_for_send();
 	if (!path)
@@ -5003,6 +5044,8 @@ static int send_write(struct send_ctx *sctx, u64 offset, u32 len)
 	int ret = 0;
 	struct fs_path *p;
 
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
+
 	p = fs_path_alloc();
 	if (!p)
 		return -ENOMEM;
@@ -5031,6 +5074,22 @@ out:
 	return ret;
 }
 
+static int send_total_data_size(struct send_ctx *sctx, u64 data_size)
+{
+	int ret;
+
+	ret = begin_cmd(sctx, BTRFS_SEND_C_TOTAL_DATA_SIZE);
+	if (ret < 0)
+		goto out;
+
+	TLV_PUT_U64(sctx, BTRFS_SEND_A_SIZE, data_size);
+	ret = send_cmd(sctx);
+
+tlv_put_failure:
+out:
+	return ret;
+}
+
 /*
  * Send a clone command to user space.
  */
@@ -5041,6 +5100,8 @@ static int send_clone(struct send_ctx *sctx,
 	int ret = 0;
 	struct fs_path *p;
 	u64 gen;
+
+	ASSERT(sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE);
 
 	btrfs_debug(sctx->send_root->fs_info,
 		    "send_clone offset=%llu, len=%d, clone_root=%llu, clone_inode=%llu, clone_offset=%llu",
@@ -5112,6 +5173,11 @@ static int send_update_extent(struct send_ctx *sctx,
 {
 	int ret = 0;
 	struct fs_path *p;
+
+	if (sctx->phase == SEND_PHASE_CALCULATE_DATA_SIZE) {
+		sctx->total_data_size += len;
+		return 0;
+	}
 
 	p = fs_path_alloc();
 	if (!p)
@@ -5775,6 +5841,12 @@ next:
 		path->slots[0]++;
 	}
 
+	if (sctx->phase == SEND_PHASE_CALCULATE_DATA_SIZE) {
+		if (offset < sctx->cur_inode_size)
+			sctx->total_data_size += len;
+		goto out;
+	}
+
 	if (len > 0)
 		ret = send_extent_data(sctx, dst_path, offset, len);
 	else
@@ -6191,10 +6263,12 @@ static int process_extent(struct send_ctx *sctx,
 		}
 	}
 
-	ret = find_extent_clone(sctx, path, key->objectid, key->offset,
-			sctx->cur_inode_size, &found_clone);
-	if (ret != -ENOENT && ret < 0)
-		goto out;
+	if (sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE) {
+		ret = find_extent_clone(sctx, path, key->objectid, key->offset,
+					sctx->cur_inode_size, &found_clone);
+		if (ret != -ENOENT && ret < 0)
+			goto out;
+	}
 
 	ret = send_write_or_clone(sctx, path, key, found_clone);
 	if (ret)
@@ -6310,6 +6384,9 @@ static int finish_inode_if_needed(struct send_ctx *sctx, int at_end)
 	if (!at_end && sctx->cmp_key->objectid == sctx->cur_ino)
 		goto out;
 
+	if (sctx->phase == SEND_PHASE_CALCULATE_DATA_SIZE)
+		goto truncate_inode;
+
 	ret = get_inode_info(sctx->send_root, sctx->cur_ino, NULL, NULL,
 			&left_mode, &left_uid, &left_gid, NULL, &left_fileattr);
 	if (ret < 0)
@@ -6342,6 +6419,7 @@ static int finish_inode_if_needed(struct send_ctx *sctx, int at_end)
 			need_truncate = 0;
 	}
 
+truncate_inode:
 	if (S_ISREG(sctx->cur_inode_mode)) {
 		if (need_send_hole(sctx)) {
 			if (sctx->cur_inode_last_extent == (u64)-1 ||
@@ -6394,7 +6472,8 @@ static int finish_inode_if_needed(struct send_ctx *sctx, int at_end)
 	 * If other directory inodes depended on our current directory
 	 * inode's move/rename, now do their move/rename operations.
 	 */
-	if (!is_waiting_for_move(sctx, sctx->cur_ino)) {
+	if (sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE &&
+	    !is_waiting_for_move(sctx, sctx->cur_ino)) {
 		ret = apply_children_dir_moves(sctx);
 		if (ret)
 			goto out;
@@ -6610,7 +6689,8 @@ static int changed_inode(struct send_ctx *sctx,
 				sctx->left_path->nodes[0], left_ii);
 		sctx->cur_inode_rdev = btrfs_inode_rdev(
 				sctx->left_path->nodes[0], left_ii);
-		if (sctx->cur_ino != BTRFS_FIRST_FREE_OBJECTID)
+		if (sctx->cur_ino != BTRFS_FIRST_FREE_OBJECTID &&
+		    sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE)
 			ret = send_create_inode_if_needed(sctx);
 	} else if (result == BTRFS_COMPARE_TREE_DELETED) {
 		sctx->cur_inode_gen = right_gen;
@@ -6632,17 +6712,19 @@ static int changed_inode(struct send_ctx *sctx,
 			/*
 			 * First, process the inode as if it was deleted.
 			 */
-			sctx->cur_inode_gen = right_gen;
-			sctx->cur_inode_new = false;
-			sctx->cur_inode_deleted = true;
-			sctx->cur_inode_size = btrfs_inode_size(
+			if (sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE) {
+				sctx->cur_inode_gen = right_gen;
+				sctx->cur_inode_new = false;
+				sctx->cur_inode_deleted = true;
+				sctx->cur_inode_size = btrfs_inode_size(
 					sctx->right_path->nodes[0], right_ii);
-			sctx->cur_inode_mode = btrfs_inode_mode(
+				sctx->cur_inode_mode = btrfs_inode_mode(
 					sctx->right_path->nodes[0], right_ii);
-			ret = process_all_refs(sctx,
-					BTRFS_COMPARE_TREE_DELETED);
-			if (ret < 0)
-				goto out;
+				ret = process_all_refs(sctx,
+						   BTRFS_COMPARE_TREE_DELETED);
+				if (ret < 0)
+					goto out;
+			}
 
 			/*
 			 * Now process the inode as if it was new.
@@ -6656,29 +6738,38 @@ static int changed_inode(struct send_ctx *sctx,
 					sctx->left_path->nodes[0], left_ii);
 			sctx->cur_inode_rdev = btrfs_inode_rdev(
 					sctx->left_path->nodes[0], left_ii);
-			ret = send_create_inode_if_needed(sctx);
-			if (ret < 0)
-				goto out;
-
-			ret = process_all_refs(sctx, BTRFS_COMPARE_TREE_NEW);
-			if (ret < 0)
-				goto out;
+			if (sctx->phase != SEND_PHASE_CALCULATE_DATA_SIZE) {
+				ret = send_create_inode_if_needed(sctx);
+				if (ret < 0)
+					goto out;
+				ret = process_all_refs(sctx,
+						       BTRFS_COMPARE_TREE_NEW);
+				if (ret < 0)
+					goto out;
+			}
 			/*
 			 * Advance send_progress now as we did not get into
 			 * process_recorded_refs_if_needed in the new_gen case.
 			 */
 			sctx->send_progress = sctx->cur_ino + 1;
 
-			/*
-			 * Now process all extents and xattrs of the inode as if
-			 * they were all new.
-			 */
-			ret = process_all_extents(sctx);
-			if (ret < 0)
-				goto out;
-			ret = process_all_new_xattrs(sctx);
-			if (ret < 0)
-				goto out;
+			if (sctx->phase == SEND_PHASE_CALCULATE_DATA_SIZE) {
+				if (S_ISREG(sctx->cur_inode_mode))
+					sctx->total_data_size +=
+						sctx->cur_inode_size;
+				/* TODO: maybe account for xattrs one day too */
+			} else {
+				/*
+				 * Now process all extents and xattrs of the
+				 * inode as if they were all new.
+				 */
+				ret = process_all_extents(sctx);
+				if (ret < 0)
+					goto out;
+				ret = process_all_new_xattrs(sctx);
+				if (ret < 0)
+					goto out;
+			}
 		} else {
 			sctx->cur_inode_gen = left_gen;
 			sctx->cur_inode_new = false;
@@ -6715,6 +6806,9 @@ static int changed_ref(struct send_ctx *sctx,
 		return -EIO;
 	}
 
+	if (sctx->phase == SEND_PHASE_CALCULATE_DATA_SIZE)
+		return 0;
+
 	if (!sctx->cur_inode_new_gen &&
 	    sctx->cur_ino != BTRFS_FIRST_FREE_OBJECTID) {
 		if (result == BTRFS_COMPARE_TREE_NEW)
@@ -6742,6 +6836,9 @@ static int changed_xattr(struct send_ctx *sctx,
 		inconsistent_snapshot_error(sctx, result, "xattr");
 		return -EIO;
 	}
+
+	if (sctx->phase == SEND_PHASE_CALCULATE_DATA_SIZE)
+		return 0;
 
 	if (!sctx->cur_inode_new_gen && !sctx->cur_inode_deleted) {
 		if (result == BTRFS_COMPARE_TREE_NEW)
@@ -6907,6 +7004,8 @@ static int changed_cb(struct btrfs_path *left_path,
 	if (result == BTRFS_COMPARE_TREE_SAME) {
 		if (key->type == BTRFS_INODE_REF_KEY ||
 		    key->type == BTRFS_INODE_EXTREF_KEY) {
+			if (sctx->phase == SEND_PHASE_CALCULATE_DATA_SIZE)
+				return 0;
 			ret = compare_refs(sctx, left_path, key);
 			if (!ret)
 				return 0;
@@ -7589,6 +7688,23 @@ out:
 	return ret;
 }
 
+static int calculate_total_data_size(struct send_ctx *sctx)
+{
+	int ret;
+
+	sctx->total_data_size = 0;
+
+	if (sctx->parent_root) {
+		ret = btrfs_compare_trees(sctx->send_root, sctx->parent_root, sctx);
+		if (!ret)
+			ret = finish_inode_if_needed(sctx, 1);
+	} else {
+		ret = full_send_tree(sctx);
+	}
+
+	return ret;
+}
+
 static int send_subvol(struct send_ctx *sctx)
 {
 	int ret;
@@ -7602,6 +7718,19 @@ static int send_subvol(struct send_ctx *sctx)
 	ret = send_subvol_begin(sctx);
 	if (ret < 0)
 		goto out;
+
+	if (sctx->flags & BTRFS_SEND_FLAG_CALCULATE_DATA_SIZE) {
+		sctx->phase = SEND_PHASE_CALCULATE_DATA_SIZE;
+		ret = calculate_total_data_size(sctx);
+		if (ret < 0)
+			goto out;
+		ret = send_total_data_size(sctx, sctx->total_data_size);
+		if (ret < 0)
+			goto out;
+		sctx->phase = SEND_PHASE_STREAM_CHANGES;
+		sctx->cur_ino = 0;
+		sctx->send_progress = 0;
+	}
 
 	if (sctx->parent_root) {
 		ret = btrfs_compare_trees(sctx->send_root, sctx->parent_root, sctx);
