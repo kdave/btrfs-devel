@@ -54,6 +54,10 @@ struct fiemap {
 						    * while fs is unmounted */
 #define FIEMAP_EXTENT_PHYS_LENGTH	0x00000010 /* Physical length of extent
 						    * not the same as logical */
+#define FIEMAP_EXTENT_DATA_COMPRESSED	0x00000040 /* Data is compressed by fs.
+						    * Sets EXTENT_ENCODED and
+						    * the compressed size is
+						    * stored in fe_phys_length */
 #define FIEMAP_EXTENT_DATA_ENCRYPTED	0x00000080 /* Data is encrypted by fs.
 						    * Sets EXTENT_ENCODED */
 #define FIEMAP_EXTENT_NOT_ALIGNED	0x00000100 /* Extent offsets may not be

@@ -83,7 +83,8 @@ static int ioctl_fibmap(struct file *filp, int __user *p)
  * extent that will fit in user array.
  */
 #define SET_UNKNOWN_FLAGS	(FIEMAP_EXTENT_DELALLOC)
-#define SET_NO_UNMOUNTED_IO_FLAGS	(FIEMAP_EXTENT_DATA_ENCRYPTED)
+#define SET_NO_UNMOUNTED_IO_FLAGS	(FIEMAP_EXTENT_DATA_ENCRYPTED | \
+					 FIEMAP_EXTENT_DATA_COMPRESSED)
 #define SET_NOT_ALIGNED_FLAGS	(FIEMAP_EXTENT_DATA_TAIL|FIEMAP_EXTENT_DATA_INLINE)
 int fiemap_fill_next_extent(struct fiemap_extent_info *fieinfo, u64 logical,
 			    u64 phys, u64 len, u64 phys_len, u32 flags)
@@ -113,6 +114,9 @@ int fiemap_fill_next_extent(struct fiemap_extent_info *fieinfo, u64 logical,
 	extent.fe_length = len;
 	extent.fe_flags = flags;
 	extent.fe_phys_length = phys_len;
+
+	WARN_ON_ONCE((flags & FIEMAP_EXTENT_DATA_COMPRESSED)
+		&& !(flags & FIEMAP_EXTENT_ENCODED));
 
 	dest += fieinfo->fi_extents_mapped;
 	if (copy_to_user(dest, &extent, sizeof(extent)))
