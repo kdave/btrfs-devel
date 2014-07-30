@@ -72,6 +72,7 @@ static int ioctl_fibmap(struct file *filp, int __user *p)
  * @logical:	Extent logical start offset, in bytes
  * @phys:	Extent physical start offset, in bytes
  * @len:	Extent length, in bytes
+ * @phys_len:   Physical extent length in bytes
  * @flags:	FIEMAP_EXTENT flags that describe this extent
  *
  * Called from file system ->fiemap callback. Will populate extent
@@ -85,7 +86,7 @@ static int ioctl_fibmap(struct file *filp, int __user *p)
 #define SET_NO_UNMOUNTED_IO_FLAGS	(FIEMAP_EXTENT_DATA_ENCRYPTED)
 #define SET_NOT_ALIGNED_FLAGS	(FIEMAP_EXTENT_DATA_TAIL|FIEMAP_EXTENT_DATA_INLINE)
 int fiemap_fill_next_extent(struct fiemap_extent_info *fieinfo, u64 logical,
-			    u64 phys, u64 len, u32 flags)
+			    u64 phys, u64 len, u64 phys_len, u32 flags)
 {
 	struct fiemap_extent extent;
 	struct fiemap_extent __user *dest = fieinfo->fi_extents_start;
@@ -111,6 +112,7 @@ int fiemap_fill_next_extent(struct fiemap_extent_info *fieinfo, u64 logical,
 	extent.fe_physical = phys;
 	extent.fe_length = len;
 	extent.fe_flags = flags;
+	extent.fe_phys_length = phys_len;
 
 	dest += fieinfo->fi_extents_mapped;
 	if (copy_to_user(dest, &extent, sizeof(extent)))
@@ -347,10 +349,11 @@ int __generic_block_fiemap(struct inode *inode,
 				flags = FIEMAP_EXTENT_MERGED|FIEMAP_EXTENT_LAST;
 				ret = fiemap_fill_next_extent(fieinfo, logical,
 							      phys, size,
-							      flags);
+							      0, flags);
 			} else if (size) {
 				ret = fiemap_fill_next_extent(fieinfo, logical,
-							      phys, size, flags);
+							      phys, size,
+							      0, flags);
 				size = 0;
 			}
 
@@ -376,7 +379,7 @@ int __generic_block_fiemap(struct inode *inode,
 			if (start_blk > last_blk && !whole_file) {
 				ret = fiemap_fill_next_extent(fieinfo, logical,
 							      phys, size,
-							      flags);
+							      0, flags);
 				break;
 			}
 
@@ -387,7 +390,7 @@ int __generic_block_fiemap(struct inode *inode,
 			if (size) {
 				ret = fiemap_fill_next_extent(fieinfo, logical,
 							      phys, size,
-							      flags);
+							      0, flags);
 				if (ret)
 					break;
 			}

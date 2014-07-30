@@ -2287,7 +2287,7 @@ static int ext4_fill_fiemap_extents(struct inode *inode,
 				(__u64)es.es_lblk << blksize_bits,
 				(__u64)es.es_pblk << blksize_bits,
 				(__u64)es.es_len << blksize_bits,
-				flags);
+				0, flags);
 			if (err < 0)
 				break;
 			if (err == 1) {
@@ -5144,7 +5144,7 @@ static int ext4_xattr_fiemap(struct inode *inode,
 
 	if (physical)
 		error = fiemap_fill_next_extent(fieinfo, 0, physical,
-						length, flags);
+						length, 0, flags);
 	return (error < 0 ? error : 0);
 }
 

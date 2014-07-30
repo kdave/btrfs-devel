@@ -1862,7 +1862,7 @@ int ext4_inline_data_fiemap(struct inode *inode,
 
 	if (physical)
 		error = fiemap_fill_next_extent(fieinfo, start, physical,
-						inline_len, flags);
+						inline_len, 0, flags);
 	brelse(iloc.bh);
 out:
 	up_read(&EXT4_I(inode)->xattr_sem);

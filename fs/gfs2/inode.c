@@ -2024,7 +2024,7 @@ static int gfs2_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 			len = size - start;
 		if (start < size)
 			ret = fiemap_fill_next_extent(fieinfo, start, phys,
-						      len, flags);
+						      len, 0, flags);
 		if (ret == 1)
 			ret = 0;
 	} else {
