@@ -111,7 +111,7 @@ int fiemap_fill_next_extent(struct fiemap_extent_info *fieinfo, u64 logical,
 	memset(&extent, 0, sizeof(extent));
 	extent.fe_logical = logical;
 	extent.fe_physical = phys;
-	extent.fe_length = len;
+	extent.fe_logi_length = len;
 	extent.fe_flags = flags;
 	extent.fe_phys_length = phys_len;
 

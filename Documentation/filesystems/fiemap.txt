@@ -82,9 +82,10 @@ struct fiemap_extent {
 			      * the extent */
 	__u64	fe_physical; /* physical offset in bytes for the start
 			      * of the extent */
-	__u64	fe_length;   /* length in bytes for the extent */
+	__u64	fe_logi_length; /* logical length in bytes for the extent */
 	__u64   fe_phys_length; /* physical length in bytes, may be different from
-                                 * fe_length, is valid if PHYS_LENGTH flag set */
+                                 * fe_logi_length, is valid if PHYS_LENGTH flag
+				 * is set */
 	__u64	fe_reserved64;
 	__u32	fe_flags;    /* FIEMAP_EXTENT_* flags for this extent */
 	__u32	fe_reserved[3];
@@ -93,12 +94,12 @@ struct fiemap_extent {
 All offsets and lengths are in bytes and mirror those on disk.  It is valid
 for an extents logical offset to start before the request or its logical
 length to extend past the request.  Unless FIEMAP_EXTENT_NOT_ALIGNED is
-returned, fe_logical, fe_physical, and fe_length will be aligned to the
+returned, fe_logical, fe_physical, and fe_logi_length will be aligned to the
 block size of the file system.  With the exception of extents flagged as
 FIEMAP_EXTENT_MERGED, adjacent extents will not be merged.  The value of
 fe_phys_length is valid if FIEMAP_EXTENT_PHYS_LENGTH is set.  It may be
-different from fe_length and may set additional extent flags that indicate
-the reason, eg. for compression it's FIEMAP_EXTENT_DATA_COMPRESSED.
+different from fe_logi_length and may set additional extent flags that
+indicate the reason, eg. for compression it's FIEMAP_EXTENT_DATA_COMPRESSED.
 
 The fe_flags field contains flags which describe the extent returned.
 A special flag, FIEMAP_EXTENT_LAST is always set on the last extent in
