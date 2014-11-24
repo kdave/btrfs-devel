@@ -2922,18 +2922,6 @@ retry_root_backup:
 
 	btrfs_close_extra_devices(fs_devices, 1);
 
-	ret = btrfs_sysfs_add_fsid(fs_devices, NULL, 1);
-	if (ret && ret != -EEXIST) {
-		pr_err("BTRFS: failed to init sysfs fsid interface: %d\n", ret);
-		goto fail_block_groups;
-	}
-
-	ret = btrfs_sysfs_add_device(fs_devices, 1);
-	if (ret) {
-		pr_err("BTRFS: failed to init sysfs device interface: %d\n", ret);
-		goto fail_fsdev_sysfs;
-	}
-
 	ret = btrfs_sysfs_add_mounted(fs_info);
 	if (ret) {
 		pr_err("BTRFS: failed to init sysfs interface: %d\n", ret);

@@ -394,6 +394,10 @@ int btrfs_dev_replace_start(struct btrfs_root *root,
 	if (ret)
 		btrfs_err(root->fs_info, "kobj add dev failed %d\n", ret);
 
+	ret = btrfs_sysfs_add_device_attr(tgt_device);
+	if (ret && ret != -EEXIST)
+		btrfs_err(root->fs_info, "sysfs create dev failed %d\n", ret);
+
 	btrfs_wait_ordered_roots(root->fs_info, -1);
 
 	/* force writing the updated state information to disk */
@@ -583,6 +587,8 @@ static int btrfs_dev_replace_finishing(struct btrfs_fs_info *fs_info,
 	if (src_device->fs_devices->seeding &&
 				!src_device->fs_devices->num_devices)
 		btrfs_sysfs_remove_fsid(src_device->fs_devices);
+	else
+		btrfs_sysfs_rm_device_attr(src_device);
 	btrfs_rm_dev_replace_free_srcdev(fs_info, src_device);
 
 	/* write back the superblocks */

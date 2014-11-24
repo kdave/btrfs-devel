@@ -47,6 +47,11 @@ struct btrfs_pending_bios {
 #define btrfs_device_data_ordered_init(device) do { } while (0)
 #endif
 
+struct btrfs_device_kobj {
+	struct kobject dev_kobj;
+	struct btrfs_device *device;
+};
+
 struct btrfs_device {
 	struct list_head dev_list;
 	struct list_head dev_alloc_list;
@@ -150,6 +155,9 @@ struct btrfs_device {
 	/* Counter to record the change of device stats */
 	atomic_t dev_stats_ccnt;
 	atomic_t dev_stat_values[BTRFS_DEV_STAT_VALUES_MAX];
+
+	struct btrfs_device_kobj *dev_kobjp;
+	struct completion dev_kobj_unregister;
 };
 
 /*
@@ -260,6 +268,8 @@ struct btrfs_fs_devices {
 	struct kobject fsid_kobj;
 	struct kobject *device_dir_kobj;
 	struct completion kobj_unregister;
+
+	long unsigned int state;
 };
 
 #define BTRFS_BIO_INLINE_CSUM_SIZE	64
