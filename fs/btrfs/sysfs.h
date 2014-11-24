@@ -87,12 +87,20 @@ int btrfs_sysfs_add_device_link(struct btrfs_fs_devices *fs_devices,
 int btrfs_sysfs_rm_device_link(struct btrfs_fs_devices *fs_devices,
                 struct btrfs_device *one_device, int follow_seed);
 int btrfs_sysfs_add_fsid(struct btrfs_fs_devices *fs_devs,
-				struct kobject *parent, int follow_seed);
+					struct kobject *parent);
 void btrfs_sysfs_remove_fsid(struct btrfs_fs_devices *fs_devs);
-int btrfs_sysfs_add_device(struct btrfs_fs_devices *fs_devs, int follow_seed);
+int btrfs_sysfs_add_device(struct btrfs_fs_devices *fs_devs);
 int btrfs_sysfs_add_seed_dir(struct btrfs_fs_devices *fs_devs);
 void btrfs_sysfs_rm_seed_dir(struct btrfs_fs_devices *fs_devs);
 void btrfs_sysfs_prepare_sprout(struct btrfs_fs_devices *fs_devices,
 				struct btrfs_fs_devices *seed_devices,
 				struct btrfs_fs_devices *old_devices);
+int btrfs_sysfs_add_device_attr(struct btrfs_device *dev);
+void btrfs_sysfs_rm_device_attr(struct btrfs_device *dev);
+void btrfs_sysfs_add_devices_attr(struct btrfs_fs_devices *fs_devs);
+void btrfs_sysfs_rm_devices_attr(struct btrfs_fs_devices *fs_devs);
+int btrfs_sysfs_add_fsid_attr(struct btrfs_fs_devices *fs_devs);
+void btrfs_sysfs_rm_fsid_attr(struct btrfs_fs_devices *fs_devs);
+int btrfs_sysfs_update_fsid_devices_attr(struct btrfs_fs_devices *fs_devs,
+							int follow_seed);
 #endif /* _BTRFS_SYSFS_H_ */

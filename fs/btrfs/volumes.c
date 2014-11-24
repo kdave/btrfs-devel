@@ -491,6 +491,7 @@ void btrfs_free_stale_device(struct btrfs_device *cur_dev)
 				free_fs_devices(fs_devs);
 			} else {
 				fs_devs->num_devices--;
+				btrfs_sysfs_rm_device_attr(dev);
 				list_del(&dev->dev_list);
 				rcu_string_free(dev->name);
 				kfree(dev);
@@ -528,9 +529,9 @@ static noinline int device_list_add(const char *path,
 		list_add(&fs_devices->list, &fs_uuids);
 
 		device = NULL;
-		if (btrfs_sysfs_add_fsid(fs_devices, NULL, 0))
+		if (btrfs_sysfs_add_fsid(fs_devices, NULL))
 			printk(KERN_WARNING "Btrfs: sysfs add fsid failed\n");
-		if (btrfs_sysfs_add_device(fs_devices, 0))
+		if (btrfs_sysfs_add_device(fs_devices))
 			printk(KERN_WARNING "Btrfs: sysfs add device failed\n");
 	} else {
 		device = __find_device(&fs_devices->devices, devid,
@@ -562,6 +563,10 @@ static noinline int device_list_add(const char *path,
 
 		ret = 1;
 		device->fs_devices = fs_devices;
+
+		if (btrfs_sysfs_add_device_attr(device))
+			pr_warn("Btrfs: sysfs create dev failed\n");
+
 	} else if (!device->name || strcmp(device->name->str, path)) {
 		/*
 		 * When FS is already mounted.
@@ -1765,6 +1770,7 @@ int btrfs_rm_device(struct btrfs_root *root, char *device_path, u64 devid)
 		/* remove sysfs entry */
 		btrfs_sysfs_rm_device_link(root->fs_info->fs_devices, device, 0);
 	}
+	btrfs_sysfs_rm_device_attr(device);
 
 	call_rcu(&device->rcu, free_device);
 
@@ -2260,6 +2266,7 @@ int btrfs_init_new_device(struct btrfs_root *root, char *device_path)
 
 	/* add sysfs device entry */
 	btrfs_sysfs_add_device_link(root->fs_info->fs_devices, device, 0);
+	btrfs_sysfs_add_device_attr(device);
 
 	/*
 	 * we've got more storage, clear any full flags on the space
@@ -5961,6 +5968,8 @@ static struct btrfs_device *add_missing_dev(struct btrfs_root *root,
 	device->missing = 1;
 	fs_devices->missing_devices++;
 
+	btrfs_sysfs_add_device_attr(device);
+
 	return device;
 }
 
@@ -6180,6 +6189,31 @@ static struct btrfs_fs_devices *open_seed_devices(struct btrfs_root *root,
 
 	fs_devices->seed = root->fs_info->fs_devices->seed;
 	root->fs_info->fs_devices->seed = fs_devices;
+
+	if (!root->fs_info->fs_devices->fsid_kobj.state_initialized) {
+		pr_err("BTRFS: sysfs base fsid uninitialized\n");
+		goto out;
+	}
+
+	btrfs_sysfs_add_seed_dir(root->fs_info->fs_devices);
+	ret = btrfs_sysfs_add_fsid(fs_devices,
+				root->fs_info->fs_devices->seed_dir_kobj);
+	if (!ret || ret == -EEXIST) {
+		if (fs_devices->seed) {
+			btrfs_sysfs_add_seed_dir(fs_devices);
+			if (kobject_move(&fs_devices->seed->fsid_kobj,
+						fs_devices->seed_dir_kobj))
+				pr_warn("Btrfs: sysfs: kobj move failed for seed\n");
+		}
+
+		ret = btrfs_sysfs_add_device(fs_devices);
+		if (ret)
+			pr_err("BTRFS: failed to init sysfs device dir: %d\n", ret);
+
+		btrfs_sysfs_add_devices_attr(fs_devices);
+	} else {
+		pr_err("BTRFS: failed to init sysfs fsid: %d\n", ret);
+	}
 
 out:
 	return fs_devices;
@@ -6807,6 +6841,13 @@ void btrfs_close_one_device(struct btrfs_device *device)
 
 	list_replace_rcu(&device->dev_list, &new_device->dev_list);
 	new_device->fs_devices = device->fs_devices;
+
+	if (device->dev_kobjp) {
+		new_device->dev_kobjp = device->dev_kobjp;
+		new_device->dev_kobjp->device = new_device;
+		device->dev_kobjp = NULL;
+	}
+	init_completion(&new_device->dev_kobj_unregister);
 
 	call_rcu(&device->rcu, free_device);
 }
