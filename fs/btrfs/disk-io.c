@@ -2937,7 +2937,7 @@ retry_root_backup:
 	ret = btrfs_sysfs_add_mounted(fs_info);
 	if (ret) {
 		pr_err("BTRFS: failed to init sysfs interface: %d\n", ret);
-		goto fail_fsdev_sysfs;
+		goto fail_block_groups;
 	}
 
 	ret = btrfs_init_space_info(fs_info);
@@ -3115,9 +3115,6 @@ fail_cleaner:
 
 fail_sysfs:
 	btrfs_sysfs_remove_mounted(fs_info);
-
-fail_fsdev_sysfs:
-	btrfs_sysfs_remove_fsid(fs_info->fs_devices);
 
 fail_block_groups:
 	btrfs_put_block_group_cache(fs_info);
@@ -3815,7 +3812,10 @@ void close_ctree(struct btrfs_root *root)
 	}
 
 	btrfs_sysfs_remove_mounted(fs_info);
-	btrfs_sysfs_remove_fsid(fs_info->fs_devices);
+	if (fs_info->fs_devices->seed) {
+		btrfs_sysfs_remove_fsid(fs_info->fs_devices->seed);
+		btrfs_sysfs_rm_seed_dir(fs_info->fs_devices);
+	}
 
 	btrfs_free_fs_roots(fs_info);
 

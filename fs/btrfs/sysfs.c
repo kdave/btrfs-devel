@@ -880,6 +880,7 @@ out1:
 void btrfs_exit_sysfs(void)
 {
 	sysfs_remove_group(&btrfs_kset->kobj, &btrfs_feature_attr_group);
+	btrfs_sysfs_remove_fsid(NULL);
 	kset_unregister(btrfs_kset);
 	debugfs_remove_recursive(btrfs_debugfs_root_dentry);
 }
@@ -890,7 +891,8 @@ void btrfs_sysfs_prepare_sprout_reset(void)
 }
 
 void btrfs_sysfs_prepare_sprout(struct btrfs_fs_devices *fs_devices,
-				struct btrfs_fs_devices *seed_devices)
+				struct btrfs_fs_devices *seed_devices,
+				struct btrfs_fs_devices *old_devices)
 {
 	char fsid_buf[BTRFS_UUID_UNPARSED_SIZE];
 
@@ -939,4 +941,7 @@ void btrfs_sysfs_prepare_sprout(struct btrfs_fs_devices *fs_devices,
 					seed_devices->seed_dir_kobj))
 			pr_warn("Btrfs: sysfs: kobject move failed\n");
 	}
+
+	btrfs_sysfs_add_fsid(old_devices, NULL, 0);
+	btrfs_sysfs_add_device(old_devices, 0);
 }
