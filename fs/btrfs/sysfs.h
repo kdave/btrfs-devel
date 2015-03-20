@@ -93,5 +93,6 @@ int btrfs_sysfs_add_device(struct btrfs_fs_devices *fs_devs, int follow_seed);
 int btrfs_sysfs_add_seed_dir(struct btrfs_fs_devices *fs_devs);
 void btrfs_sysfs_rm_seed_dir(struct btrfs_fs_devices *fs_devs);
 void btrfs_sysfs_prepare_sprout(struct btrfs_fs_devices *fs_devices,
-				struct btrfs_fs_devices *seed_devices);
+				struct btrfs_fs_devices *seed_devices,
+				struct btrfs_fs_devices *old_devices);
 #endif /* _BTRFS_SYSFS_H_ */

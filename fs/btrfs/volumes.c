@@ -528,6 +528,10 @@ static noinline int device_list_add(const char *path,
 		list_add(&fs_devices->list, &fs_uuids);
 
 		device = NULL;
+		if (btrfs_sysfs_add_fsid(fs_devices, NULL, 0))
+			printk(KERN_WARNING "Btrfs: sysfs add fsid failed\n");
+		if (btrfs_sysfs_add_device(fs_devices, 0))
+			printk(KERN_WARNING "Btrfs: sysfs add device failed\n");
 	} else {
 		device = __find_device(&fs_devices->devices, devid,
 				       disk_super->dev_item.uuid);
@@ -796,6 +800,7 @@ int btrfs_close_devices(struct btrfs_fs_devices *fs_devices)
 		fs_devices = seed_devices;
 		seed_devices = fs_devices->seed;
 		__btrfs_close_devices(fs_devices);
+		btrfs_sysfs_remove_fsid(fs_devices);
 		free_fs_devices(fs_devices);
 	}
 	/*
@@ -2101,7 +2106,7 @@ static int btrfs_prepare_sprout(struct btrfs_root *root)
 		      ~BTRFS_SUPER_FLAG_SEEDING;
 	btrfs_set_super_flags(disk_super, super_flags);
 
-	btrfs_sysfs_prepare_sprout(fs_devices, seed_devices);
+	btrfs_sysfs_prepare_sprout(fs_devices, seed_devices, old_devices);
 
 	return 0;
 }
