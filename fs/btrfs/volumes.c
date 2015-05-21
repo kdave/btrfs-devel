@@ -504,6 +504,7 @@ void btrfs_free_stale_device(struct btrfs_device *cur_dev)
  *
  * Returns:
  * 1   - first time device is seen
+ * 2   - device already known but now is overwritten with new path
  * 0   - device already known
  * < 0 - error
  */
@@ -603,6 +604,7 @@ static noinline int device_list_add(const char *path,
 			fs_devices->missing_devices--;
 			device->missing = 0;
 		}
+		ret = 2;
 	}
 
 	/*
@@ -998,8 +1000,9 @@ int btrfs_scan_one_device(const char *path, fmode_t flags, void *holder,
 
 	ret = device_list_add(path, disk_super, devid, fs_devices_ret);
 	if (ret > 0) {
-		printk(KERN_INFO "BTRFS: device fsid %pU devid %llu transid %llu %s\n",
-						disk_super->fsid, devid, transid, path);
+		printk(KERN_INFO "BTRFS: device fsid %pU devid %llu transid %llu %s %s\n",
+						disk_super->fsid, devid, transid, path,
+						ret == 2 ? "(overwritten)":"");
 		ret = 0;
 	}
 	if (!ret && fs_devices_ret)
