@@ -83,11 +83,15 @@ extern const char * const btrfs_feature_set_names[3];
 extern struct kobj_type space_info_ktype;
 extern struct kobj_type btrfs_raid_ktype;
 int btrfs_sysfs_add_device_link(struct btrfs_fs_devices *fs_devices,
-		struct btrfs_device *one_device);
+		struct btrfs_device *one_device, int follow_seed);
 int btrfs_sysfs_rm_device_link(struct btrfs_fs_devices *fs_devices,
-                struct btrfs_device *one_device);
+                struct btrfs_device *one_device, int follow_seed);
 int btrfs_sysfs_add_fsid(struct btrfs_fs_devices *fs_devs,
-				struct kobject *parent);
-int btrfs_sysfs_add_device(struct btrfs_fs_devices *fs_devs);
+				struct kobject *parent, int follow_seed);
 void btrfs_sysfs_remove_fsid(struct btrfs_fs_devices *fs_devs);
+int btrfs_sysfs_add_device(struct btrfs_fs_devices *fs_devs, int follow_seed);
+int btrfs_sysfs_add_seed_dir(struct btrfs_fs_devices *fs_devs);
+void btrfs_sysfs_rm_seed_dir(struct btrfs_fs_devices *fs_devs);
+void btrfs_sysfs_prepare_sprout(struct btrfs_fs_devices *fs_devices,
+				struct btrfs_fs_devices *seed_devices);
 #endif /* _BTRFS_SYSFS_H_ */
