@@ -517,6 +517,11 @@ static int addrm_unknown_feature_attrs(struct btrfs_fs_info *fs_info, bool add)
 
 static void __btrfs_sysfs_remove_fsid(struct btrfs_fs_devices *fs_devs)
 {
+	if (fs_devs->seed) {
+		__btrfs_sysfs_remove_fsid(fs_devs->seed);
+		btrfs_sysfs_rm_seed_dir(fs_devs);
+	}
+
 	if (fs_devs->device_dir_kobj) {
 		kobject_del(fs_devs->device_dir_kobj);
 		kobject_put(fs_devs->device_dir_kobj);
@@ -557,7 +562,7 @@ void btrfs_sysfs_remove_mounted(struct btrfs_fs_info *fs_info)
 	addrm_unknown_feature_attrs(fs_info, false);
 	sysfs_remove_group(&fs_info->fs_devices->fsid_kobj, &btrfs_feature_attr_group);
 	sysfs_remove_files(&fs_info->fs_devices->fsid_kobj, btrfs_attrs);
-	btrfs_sysfs_rm_device_link(fs_info->fs_devices, NULL);
+	btrfs_sysfs_rm_device_link(fs_info->fs_devices, NULL, 1);
 }
 
 const char * const btrfs_feature_set_names[3] = {
@@ -638,7 +643,7 @@ static void init_feature_attrs(void)
 /* when one_device is NULL, it removes all device links */
 
 int btrfs_sysfs_rm_device_link(struct btrfs_fs_devices *fs_devices,
-		struct btrfs_device *one_device)
+		struct btrfs_device *one_device, int follow_seed)
 {
 	struct hd_struct *disk;
 	struct kobject *disk_kobj;
@@ -668,27 +673,38 @@ int btrfs_sysfs_rm_device_link(struct btrfs_fs_devices *fs_devices,
 						disk_kobj->name);
 	}
 
+	if (follow_seed && fs_devices->seed)
+		btrfs_sysfs_rm_device_link(fs_devices->seed, NULL, follow_seed);
+
 	return 0;
 }
 
-int btrfs_sysfs_add_device(struct btrfs_fs_devices *fs_devs)
+int btrfs_sysfs_add_device(struct btrfs_fs_devices *fs_devs, int follow_seed)
 {
-	if (!fs_devs->device_dir_kobj)
-		fs_devs->device_dir_kobj = kobject_create_and_add("devices",
-						&fs_devs->fsid_kobj);
+	while (fs_devs) {
+		if (!fs_devs->device_dir_kobj)
+			fs_devs->device_dir_kobj = kobject_create_and_add(
+					"devices", &fs_devs->fsid_kobj);
 
-	if (!fs_devs->device_dir_kobj)
-		return -ENOMEM;
+		if (!fs_devs->device_dir_kobj)
+			return -ENOMEM;
+
+		if (!follow_seed)
+			return 0;
+
+		fs_devs = fs_devs->seed;
+	}
 
 	return 0;
 }
 
 int btrfs_sysfs_add_device_link(struct btrfs_fs_devices *fs_devices,
-				struct btrfs_device *one_device)
+			struct btrfs_device *one_device, int follow_seed)
 {
 	int error = 0;
 	struct btrfs_device *dev;
 
+again:
 	list_for_each_entry(dev, &fs_devices->devices, dev_list) {
 		struct hd_struct *disk;
 		struct kobject *disk_kobj;
@@ -708,7 +724,35 @@ int btrfs_sysfs_add_device_link(struct btrfs_fs_devices *fs_devices,
 			break;
 	}
 
+	if (follow_seed && fs_devices->seed) {
+		fs_devices = fs_devices->seed;
+		goto again;
+	}
+
 	return error;
+}
+
+void btrfs_sysfs_rm_seed_dir(struct btrfs_fs_devices *fs_devs)
+{
+	if (fs_devs->seed_dir_kobj) {
+		kobject_del(fs_devs->seed_dir_kobj);
+		kobject_put(fs_devs->seed_dir_kobj);
+		fs_devs->seed_dir_kobj = NULL;
+	}
+}
+
+int btrfs_sysfs_add_seed_dir(struct btrfs_fs_devices *fs_devs)
+{
+	if (!fs_devs->seed_dir_kobj)
+		fs_devs->seed_dir_kobj = kobject_create_and_add(
+					"seed", &fs_devs->fsid_kobj);
+
+	if (!fs_devs->seed_dir_kobj)
+		return -ENOMEM;
+
+	BUG_ON(!fs_devs->seed_dir_kobj->state_initialized);
+
+	return 0;
 }
 
 /* /sys/fs/btrfs/ entry */
@@ -725,15 +769,29 @@ u64 btrfs_debugfs_test;
  * And parent can be specified for seed device
  */
 int btrfs_sysfs_add_fsid(struct btrfs_fs_devices *fs_devs,
-				struct kobject *parent)
+				struct kobject *parent, int follow_seed)
 {
-	int error;
+	int error = 0;
 
-	init_completion(&fs_devs->kobj_unregister);
-	fs_devs->fsid_kobj.kset = btrfs_kset;
-	error = kobject_init_and_add(&fs_devs->fsid_kobj,
-				&btrfs_ktype, parent, "%pU", fs_devs->fsid);
-	return error;
+add_seed:
+	if (!fs_devs->fsid_kobj.state_initialized) {
+		init_completion(&fs_devs->kobj_unregister);
+		fs_devs->fsid_kobj.kset = btrfs_kset;
+		error = kobject_init_and_add(&fs_devs->fsid_kobj,
+			&btrfs_ktype, parent, "%pU", fs_devs->fsid);
+	} else {
+		error = -EEXIST;
+	}
+
+	if (!follow_seed || !fs_devs->seed)
+		return error;
+
+	btrfs_sysfs_add_seed_dir(fs_devs);
+
+	parent = fs_devs->seed_dir_kobj;
+	fs_devs = fs_devs->seed;
+
+	goto add_seed;
 }
 
 int btrfs_sysfs_add_mounted(struct btrfs_fs_info *fs_info)
@@ -744,13 +802,13 @@ int btrfs_sysfs_add_mounted(struct btrfs_fs_info *fs_info)
 
 	btrfs_set_fs_info_ptr(fs_info);
 
-	error = btrfs_sysfs_add_device_link(fs_devs, NULL);
+	error = btrfs_sysfs_add_device_link(fs_devs, NULL, 1);
 	if (error)
 		return error;
 
 	error = sysfs_create_files(fsid_kobj, btrfs_attrs);
 	if (error) {
-		btrfs_sysfs_rm_device_link(fs_devs, NULL);
+		btrfs_sysfs_rm_device_link(fs_devs, NULL, 0);
 		return error;
 	}
 
@@ -826,3 +884,59 @@ void btrfs_exit_sysfs(void)
 	debugfs_remove_recursive(btrfs_debugfs_root_dentry);
 }
 
+void btrfs_sysfs_prepare_sprout_reset(void)
+{
+	/* close call would anyway cleanup */
+}
+
+void btrfs_sysfs_prepare_sprout(struct btrfs_fs_devices *fs_devices,
+				struct btrfs_fs_devices *seed_devices)
+{
+	char fsid_buf[BTRFS_UUID_UNPARSED_SIZE];
+
+	/*
+	 * Sprouting has changed fsid of the mounted root,
+	 * so rename the fsid on the sysfs
+	 */
+	snprintf(fsid_buf, BTRFS_UUID_UNPARSED_SIZE, "%pU", fs_devices->fsid);
+	if (kobject_rename(&fs_devices->fsid_kobj, fsid_buf)) {
+		pr_warn("Btrfs: sysfs: kobject rename failed\n");
+	}
+
+	/*
+	 * Create the seed fsid inside the sprout fsid
+	 * but should not create devices dir, instead
+	 * move it from the original fs_devices
+	 */
+	memset(&seed_devices->fsid_kobj, 0, sizeof(struct kobject));
+	seed_devices->device_dir_kobj = NULL;
+	memset(&seed_devices->kobj_unregister, 0,
+					sizeof(struct completion));
+	seed_devices->seed_dir_kobj = NULL;
+
+	if (!fs_devices->seed_dir_kobj)
+		btrfs_sysfs_add_seed_dir(fs_devices);
+
+	btrfs_sysfs_add_fsid(seed_devices, fs_devices->seed_dir_kobj, 0);
+
+	if (kobject_move(fs_devices->device_dir_kobj,
+					&seed_devices->fsid_kobj))
+		pr_warn("Btrfs: sysfs: dev kobject move failed\n");
+
+	seed_devices->device_dir_kobj = fs_devices->device_dir_kobj;
+	fs_devices->device_dir_kobj = NULL;
+	btrfs_sysfs_add_device(fs_devices, 0);
+
+	/*
+	 * the kobj dev and devices attribute will be created
+	 * in the main function as part of the init_new_device
+	 * If this is a nested seed, that is if there is seed's
+	 * seed device then move that one level deep.
+	 */
+	if (seed_devices->seed) {
+		btrfs_sysfs_add_seed_dir(seed_devices);
+		if (kobject_move(&seed_devices->seed->fsid_kobj,
+					seed_devices->seed_dir_kobj))
+			pr_warn("Btrfs: sysfs: kobject move failed\n");
+	}
+}

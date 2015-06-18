@@ -27,6 +27,7 @@
 #include <linux/kthread.h>
 #include <linux/raid/pq.h>
 #include <linux/semaphore.h>
+#include <linux/kobject.h>
 #include <asm/div64.h>
 #include "ctree.h"
 #include "extent_map.h"
@@ -1787,7 +1788,7 @@ int btrfs_rm_device(struct btrfs_root *root, char *device_path)
 	if (device->bdev) {
 		device->fs_devices->open_devices--;
 		/* remove sysfs entry */
-		btrfs_sysfs_rm_device_link(root->fs_info->fs_devices, device);
+		btrfs_sysfs_rm_device_link(root->fs_info->fs_devices, device, 0);
 	}
 
 	call_rcu(&device->rcu, free_device);
@@ -1958,7 +1959,7 @@ void btrfs_destroy_dev_replace_tgtdev(struct btrfs_fs_info *fs_info,
 	WARN_ON(!tgtdev);
 	mutex_lock(&fs_info->fs_devices->device_list_mutex);
 
-	btrfs_sysfs_rm_device_link(fs_info->fs_devices, tgtdev);
+	btrfs_sysfs_rm_device_link(fs_info->fs_devices, tgtdev, 0);
 
 	if (tgtdev->bdev) {
 		btrfs_scratch_superblocks(tgtdev->bdev,
@@ -2087,6 +2088,9 @@ static int btrfs_prepare_sprout(struct btrfs_root *root)
 	fs_devices->open_devices = 0;
 	fs_devices->missing_devices = 0;
 	fs_devices->rotating = 0;
+	if (fs_devices->seed)
+		seed_devices->seed = fs_devices->seed;
+
 	fs_devices->seed = seed_devices;
 
 	generate_random_uuid(fs_devices->fsid);
@@ -2097,6 +2101,8 @@ static int btrfs_prepare_sprout(struct btrfs_root *root)
 	super_flags = btrfs_super_flags(disk_super) &
 		      ~BTRFS_SUPER_FLAG_SEEDING;
 	btrfs_set_super_flags(disk_super, super_flags);
+
+	btrfs_sysfs_prepare_sprout(fs_devices, seed_devices);
 
 	return 0;
 }
@@ -2295,7 +2301,7 @@ int btrfs_init_new_device(struct btrfs_root *root, char *device_path)
 				    tmp + 1);
 
 	/* add sysfs device entry */
-	btrfs_sysfs_add_device_link(root->fs_info->fs_devices, device);
+	btrfs_sysfs_add_device_link(root->fs_info->fs_devices, device, 0);
 
 	/*
 	 * we've got more storage, clear any full flags on the space
@@ -2323,22 +2329,11 @@ int btrfs_init_new_device(struct btrfs_root *root, char *device_path)
 	}
 
 	if (seeding_dev) {
-		char fsid_buf[BTRFS_UUID_UNPARSED_SIZE];
-
 		ret = btrfs_finish_sprout(trans, root);
 		if (ret) {
 			btrfs_abort_transaction(trans, root, ret);
 			goto error_trans;
 		}
-
-		/* Sprouting would change fsid of the mounted root,
-		 * so rename the fsid on the sysfs
-		 */
-		snprintf(fsid_buf, BTRFS_UUID_UNPARSED_SIZE, "%pU",
-						root->fs_info->fsid);
-		if (kobject_rename(&root->fs_info->fs_devices->fsid_kobj,
-								fsid_buf))
-			pr_warn("BTRFS: sysfs: failed to create fsid for sprout\n");
 	}
 
 	root->fs_info->num_tolerated_disk_barrier_failures =
@@ -2374,7 +2369,7 @@ int btrfs_init_new_device(struct btrfs_root *root, char *device_path)
 error_trans:
 	btrfs_end_transaction(trans, root);
 	rcu_string_free(device->name);
-	btrfs_sysfs_rm_device_link(root->fs_info->fs_devices, device);
+	btrfs_sysfs_rm_device_link(root->fs_info->fs_devices, device, 0);
 	kfree(device);
 error:
 	blkdev_put(bdev, FMODE_EXCL);
@@ -6227,6 +6222,7 @@ static struct btrfs_fs_devices *open_seed_devices(struct btrfs_root *root,
 
 	fs_devices->seed = root->fs_info->fs_devices->seed;
 	root->fs_info->fs_devices->seed = fs_devices;
+
 out:
 	return fs_devices;
 }

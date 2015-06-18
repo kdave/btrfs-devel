@@ -397,7 +397,7 @@ int btrfs_dev_replace_start(struct btrfs_root *root,
 	args->result = BTRFS_IOCTL_DEV_REPLACE_RESULT_NO_ERROR;
 	btrfs_dev_replace_unlock(dev_replace);
 
-	ret = btrfs_sysfs_add_device_link(tgt_device->fs_devices, tgt_device);
+	ret = btrfs_sysfs_add_device_link(tgt_device->fs_devices, tgt_device, 0);
 	if (ret)
 		btrfs_err(root->fs_info, "kobj add dev failed %d\n", ret);
 
@@ -586,7 +586,10 @@ static int btrfs_dev_replace_finishing(struct btrfs_fs_info *fs_info,
 	mutex_unlock(&uuid_mutex);
 
 	/* replace the sysfs entry */
-	btrfs_sysfs_rm_device_link(fs_info->fs_devices, src_device);
+	btrfs_sysfs_rm_device_link(fs_info->fs_devices, src_device, 0);
+	if (src_device->fs_devices->seeding &&
+				!src_device->fs_devices->num_devices)
+		btrfs_sysfs_remove_fsid(src_device->fs_devices);
 	btrfs_rm_dev_replace_free_srcdev(fs_info, src_device);
 
 	/* write back the superblocks */

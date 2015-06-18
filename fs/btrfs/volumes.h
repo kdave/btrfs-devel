@@ -246,6 +246,7 @@ struct btrfs_fs_devices {
 
 	struct btrfs_fs_devices *seed;
 	int seeding;
+	struct kobject *seed_dir_kobj;
 
 	int opened;
 
