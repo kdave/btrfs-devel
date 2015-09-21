@@ -998,13 +998,8 @@ int btrfs_scan_one_device(const char *path, fmode_t flags, void *holder,
 
 	ret = device_list_add(path, disk_super, devid, fs_devices_ret);
 	if (ret > 0) {
-		if (disk_super->label[0]) {
-			printk(KERN_INFO "BTRFS: device label %s ", disk_super->label);
-		} else {
-			printk(KERN_INFO "BTRFS: device fsid %pU ", disk_super->fsid);
-		}
-
-		printk(KERN_CONT "devid %llu transid %llu %s\n", devid, transid, path);
+		printk(KERN_INFO "BTRFS: device fsid %pU devid %llu transid %llu %s\n",
+						disk_super->fsid, devid, transid, path);
 		ret = 0;
 	}
 	if (!ret && fs_devices_ret)
