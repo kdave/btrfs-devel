@@ -4803,10 +4803,15 @@ static long btrfs_ioctl_qgroup_assign(struct file *file, void __user *arg)
 						sa->src, sa->dst);
 	}
 
+	if (ret)
+		btrfs_err(root->fs_info,
+			"add/del qgroup relation failed, assign %llu ret %d",
+			sa->assign, ret);
+
 	/* update qgroup status and info */
 	err = btrfs_run_qgroups(trans, root->fs_info);
 	if (err < 0)
-		btrfs_std_error(root->fs_info, ret,
+		btrfs_std_error(root->fs_info, err,
 			    "failed to update qgroup status and info\n");
 	err = btrfs_end_transaction(trans, root);
 	if (err && !ret)
