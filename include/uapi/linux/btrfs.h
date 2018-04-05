@@ -1101,6 +1101,12 @@ enum btrfs_err_code {
  */
 enum btrfs_clear_op_type {
 	BTRFS_CLEAR_OP_DISCARD,
+	/*
+	 * Write zeros to the range, either overwrite or with hardware offload
+	 * that can unmap the blocks internally.
+	 * (Same as blkdev_issue_zeroout() with 0 flags).
+	 */
+	BTRFS_CLEAR_OP_ZERO,
 	BTRFS_NR_CLEAR_OP_TYPES,
 };
 
