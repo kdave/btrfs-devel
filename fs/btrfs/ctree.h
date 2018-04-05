@@ -504,6 +504,8 @@ int btrfs_error_unpin_extent_range(struct btrfs_fs_info *fs_info,
 int btrfs_discard_extent(struct btrfs_fs_info *fs_info, u64 bytenr,
 			 u64 num_bytes, u64 *actual_bytes,
 			 enum btrfs_clear_op_type clear);
+int btrfs_clear_free_space(struct btrfs_fs_info *fs_info,
+			   struct btrfs_ioctl_clear_free_args *args);
 int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range);
 
 /* ctree.c */

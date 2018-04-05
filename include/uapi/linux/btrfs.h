@@ -1025,6 +1025,24 @@ enum btrfs_err_code {
 	BTRFS_ERROR_DEV_RAID1C4_MIN_NOT_MET,
 };
 
+/*
+ * Type of operation that will be used to clear unused blocks.
+ */
+enum btrfs_clear_op_type {
+	BTRFS_CLEAR_OP_DISCARD,
+	BTRFS_CLEAR_OP_ZERO,
+	BTRFS_NR_CLEAR_OP_TYPES,
+};
+
+struct btrfs_ioctl_clear_free_args {
+	__u32 type;			/* in, btrfs_clear_free_op_type */
+	__u32 reserved1;		/* padding, must be zero */
+	__u64 start;			/* in */
+	__u64 length;			/* in, out */
+	__u64 minlen;			/* in */
+	__u64 reserved2[4];
+};
+
 #define BTRFS_IOC_SNAP_CREATE _IOW(BTRFS_IOCTL_MAGIC, 1, \
 				   struct btrfs_ioctl_vol_args)
 #define BTRFS_IOC_DEFRAG _IOW(BTRFS_IOCTL_MAGIC, 2, \
@@ -1131,6 +1149,8 @@ enum btrfs_err_code {
 				   struct btrfs_ioctl_vol_args_v2)
 #define BTRFS_IOC_LOGICAL_INO_V2 _IOWR(BTRFS_IOCTL_MAGIC, 59, \
 					struct btrfs_ioctl_logical_ino_args)
+#define BTRFS_IOC_CLEAR_FREE _IOW(BTRFS_IOCTL_MAGIC, 90, \
+				struct btrfs_ioctl_clear_free_args)
 #define BTRFS_IOC_GET_SUBVOL_INFO _IOR(BTRFS_IOCTL_MAGIC, 60, \
 				struct btrfs_ioctl_get_subvol_info_args)
 #define BTRFS_IOC_GET_SUBVOL_ROOTREF _IOWR(BTRFS_IOCTL_MAGIC, 61, \
