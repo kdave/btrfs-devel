@@ -1104,6 +1104,24 @@ enum btrfs_clear_op_type {
 	BTRFS_NR_CLEAR_OP_TYPES,
 };
 
+struct btrfs_ioctl_clear_free_args {
+	/* In, type of clearing operation, enumerated in btrfs_clear_free_op_type. */
+	__u32 type;
+	/* Reserved must be zero. */
+	__u32 reserved1;
+	/*
+	 * In. Starting offset to clear from in the logical address space (same
+	 * as fstrim_range::start).
+	 */
+	__u64 start;			/* in */
+	/* In, out. Length from the start to clear (same as fstrim_range::length). */
+	__u64 length;
+	/* In. Minimal length to clear (same as fstrim_range::minlen). */
+	__u64 minlen;
+	/* Reserved, must be zero. */
+	__u64 reserved2[4];
+};
+
 #define BTRFS_IOC_SNAP_CREATE _IOW(BTRFS_IOCTL_MAGIC, 1, \
 				   struct btrfs_ioctl_vol_args)
 #define BTRFS_IOC_DEFRAG _IOW(BTRFS_IOCTL_MAGIC, 2, \
@@ -1224,6 +1242,8 @@ enum btrfs_clear_op_type {
 				     struct btrfs_ioctl_encoded_io_args)
 #define BTRFS_IOC_SUBVOL_SYNC_WAIT _IOW(BTRFS_IOCTL_MAGIC, 65, \
 					struct btrfs_ioctl_subvol_wait)
+#define BTRFS_IOC_CLEAR_FREE _IOWR(BTRFS_IOCTL_MAGIC, 66, \
+				   struct btrfs_ioctl_clear_free_args)
 
 #ifdef __cplusplus
 }

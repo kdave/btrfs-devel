@@ -6564,3 +6564,95 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
 		return bg_ret;
 	return dev_ret;
 }
+
+int btrfs_clear_free_space(struct btrfs_fs_info *fs_info,
+			   struct btrfs_ioctl_clear_free_args *args)
+{
+	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices;
+	struct btrfs_device *device;
+	struct btrfs_block_group *cache = NULL;
+	u64 group_cleared;
+	u64 range_end = U64_MAX;
+	u64 start;
+	u64 end;
+	u64 cleared = 0;
+	u64 bg_failed = 0;
+	u64 dev_failed = 0;
+	int bg_ret = 0;
+	int dev_ret = 0;
+	int ret = 0;
+
+	if (args->start == U64_MAX)
+		return -EINVAL;
+
+	/*
+	 * Check range overflow if args->length is set.  The default args->length
+	 * is U64_MAX.
+	 */
+	if (args->length != U64_MAX &&
+	    check_add_overflow(args->start, args->length, &range_end))
+		return -EINVAL;
+
+	cache = btrfs_lookup_first_block_group(fs_info, args->start);
+	for (; cache; cache = btrfs_next_block_group(cache)) {
+		if (cache->start >= range_end) {
+			btrfs_put_block_group(cache);
+			break;
+		}
+
+		start = max(args->start, cache->start);
+		end = min(range_end, cache->start + cache->length);
+
+		if (end - start >= args->minlen) {
+			if (!btrfs_block_group_done(cache)) {
+				ret = btrfs_cache_block_group(cache, true);
+				if (ret) {
+					bg_failed++;
+					bg_ret = ret;
+					continue;
+				}
+			}
+			ret = btrfs_trim_block_group(cache, &group_cleared,
+						     start, end, args->minlen,
+						     args->type);
+
+			cleared += group_cleared;
+			if (ret) {
+				bg_failed++;
+				bg_ret = ret;
+				continue;
+			}
+		}
+	}
+
+	if (bg_failed)
+		btrfs_warn(fs_info,
+			"failed to clear %llu block group(s), last error %d",
+			bg_failed, bg_ret);
+
+	mutex_lock(&fs_devices->device_list_mutex);
+	list_for_each_entry(device, &fs_devices->devices, dev_list) {
+		if (test_bit(BTRFS_DEV_STATE_MISSING, &device->dev_state))
+			continue;
+
+		ret = btrfs_trim_free_extents(device, &group_cleared, args->type);
+		if (ret) {
+			dev_failed++;
+			dev_ret = ret;
+			break;
+		}
+
+		cleared += group_cleared;
+	}
+	mutex_unlock(&fs_devices->device_list_mutex);
+
+	if (dev_failed)
+		btrfs_warn(fs_info,
+			"failed to trim %llu device(s), last error %d",
+			dev_failed, dev_ret);
+	args->length = cleared;
+	if (bg_ret)
+		return bg_ret;
+
+	return dev_ret;
+}
