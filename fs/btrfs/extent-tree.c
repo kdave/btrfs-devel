@@ -1207,14 +1207,26 @@ static int remove_extent_backref(struct btrfs_trans_handle *trans,
 static int btrfs_issue_clear_op(struct block_device *bdev, u64 start, u64 size,
 				enum btrfs_clear_op_type clear)
 {
+	unsigned flags;
+
 	switch (clear) {
 	case BTRFS_CLEAR_OP_SECURE_ERASE:
 		return blkdev_issue_secure_erase(bdev, start >> 9, size >> 9, GFP_NOFS);
 	case BTRFS_CLEAR_OP_DISCARD:
 		return blkdev_issue_discard(bdev, start >> 9, size >> 9, GFP_NOFS);
+	case BTRFS_CLEAR_OP_ZERO_NOUNMAP:
+		flags = BLKDEV_ZERO_NOUNMAP;
+		goto zeroout;
+	case BTRFS_CLEAR_OP_ZERO_NOFALLBACK:
+		flags = BLKDEV_ZERO_NOFALLBACK;
+		goto zeroout;
+	case BTRFS_CLEAR_OP_ZERO_NOUNMAP_NOFALLBACK:
+		flags = BLKDEV_ZERO_NOUNMAP | BLKDEV_ZERO_NOFALLBACK;
+		fallthrough;
 	case BTRFS_CLEAR_OP_ZERO:
+zeroout:
 		return blkdev_issue_zeroout(bdev, start >> 9, size >> 9, GFP_NOFS,
-					    0);
+					    flags);
 	default:
 		return -EOPNOTSUPP;
 	}

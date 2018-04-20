@@ -1032,6 +1032,11 @@ enum btrfs_clear_op_type {
 	BTRFS_CLEAR_OP_DISCARD,
 	BTRFS_CLEAR_OP_ZERO,
 	BTRFS_CLEAR_OP_SECURE_ERASE,
+
+	/* Fine tuning for clearing by zeros, see __blkdev_issue_zeroout */
+	BTRFS_CLEAR_OP_ZERO_NOUNMAP,
+	BTRFS_CLEAR_OP_ZERO_NOFALLBACK,
+	BTRFS_CLEAR_OP_ZERO_NOUNMAP_NOFALLBACK,
 	BTRFS_NR_CLEAR_OP_TYPES,
 };
 
