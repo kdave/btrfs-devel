@@ -1114,6 +1114,11 @@ enum btrfs_clear_op_type {
 	 * garbage collection must also be erased.
 	 */
 	BTRFS_CLEAR_OP_SECURE_ERASE,
+
+	/* Overwrite by zeros, do not try to unmap blocks. */
+	BTRFS_CLEAR_OP_ZERO_NOUNMAP,
+	/* Request unmapping the blocks and don't fall back to writing zeros. */
+	BTRFS_CLEAR_OP_ZERO_NOFALLBACK,
 	BTRFS_NR_CLEAR_OP_TYPES,
 };
 
