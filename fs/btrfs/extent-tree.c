@@ -1253,6 +1253,9 @@ static int btrfs_issue_clear_op(struct block_device *bdev, u64 start, u64 size,
 	unsigned int flags = BLKDEV_ZERO_KILLABLE;
 
 	switch (clear) {
+	case BTRFS_CLEAR_OP_SECURE_ERASE:
+		return blkdev_issue_secure_erase(bdev, start >> SECTOR_SHIFT,
+						 size >> SECTOR_SHIFT, GFP_NOFS);
 	case BTRFS_CLEAR_OP_DISCARD:
 		return blkdev_issue_discard(bdev, start >> SECTOR_SHIFT,
 					    size >> SECTOR_SHIFT, GFP_NOFS);
