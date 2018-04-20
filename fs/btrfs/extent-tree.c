@@ -1208,6 +1208,8 @@ static int btrfs_issue_clear_op(struct block_device *bdev, u64 start, u64 size,
 				enum btrfs_clear_op_type clear)
 {
 	switch (clear) {
+	case BTRFS_CLEAR_OP_SECURE_ERASE:
+		return blkdev_issue_secure_erase(bdev, start >> 9, size >> 9, GFP_NOFS);
 	case BTRFS_CLEAR_OP_DISCARD:
 		return blkdev_issue_discard(bdev, start >> 9, size >> 9, GFP_NOFS);
 	case BTRFS_CLEAR_OP_ZERO:

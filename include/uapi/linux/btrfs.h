@@ -1031,6 +1031,7 @@ enum btrfs_err_code {
 enum btrfs_clear_op_type {
 	BTRFS_CLEAR_OP_DISCARD,
 	BTRFS_CLEAR_OP_ZERO,
+	BTRFS_CLEAR_OP_SECURE_ERASE,
 	BTRFS_NR_CLEAR_OP_TYPES,
 };
 
