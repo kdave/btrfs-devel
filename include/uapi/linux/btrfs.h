@@ -1107,6 +1107,13 @@ enum btrfs_clear_op_type {
 	 * (Same as blkdev_issue_zeroout() with 0 flags).
 	 */
 	BTRFS_CLEAR_OP_ZERO,
+	/*
+	 * Do a secure erase operation on the range. If supported by the
+	 * underlying hardware, this works as regular discard except that all
+	 * copies of the discarded blocks that were possibly created by
+	 * garbage collection must also be erased.
+	 */
+	BTRFS_CLEAR_OP_SECURE_ERASE,
 	BTRFS_NR_CLEAR_OP_TYPES,
 };
 
