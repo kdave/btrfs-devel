@@ -2181,7 +2181,7 @@ int btrfs_find_device_by_devspec(struct btrfs_fs_info *fs_info, u64 devid,
 static int btrfs_prepare_sprout(struct btrfs_fs_info *fs_info)
 {
 	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices;
-	struct btrfs_fs_devices *old_devices;
+	struct btrfs_fs_devices *old_fs_devices;
 	struct btrfs_fs_devices *seed_devices;
 	struct btrfs_super_block *disk_super = fs_info->super_copy;
 	struct btrfs_device *device;
@@ -2194,14 +2194,6 @@ static int btrfs_prepare_sprout(struct btrfs_fs_info *fs_info)
 	seed_devices = alloc_fs_devices(NULL);
 	if (IS_ERR(seed_devices))
 		return PTR_ERR(seed_devices);
-
-	old_devices = clone_fs_devices(fs_devices);
-	if (IS_ERR(old_devices)) {
-		kfree(seed_devices);
-		return PTR_ERR(old_devices);
-	}
-
-	list_add(&old_devices->fs_list, &fs_uuids);
 
 	memcpy(seed_devices, fs_devices, sizeof(*seed_devices));
 	seed_devices->opened = 1;
@@ -2234,6 +2226,17 @@ static int btrfs_prepare_sprout(struct btrfs_fs_info *fs_info)
 	super_flags = btrfs_super_flags(disk_super) &
 		      ~BTRFS_SUPER_FLAG_SEEDING;
 	btrfs_set_super_flags(disk_super, super_flags);
+
+	/*
+	 * As the above code hijacked the original seed fs_devices, now
+	 * create a new one for the original seed FSID.
+	 */
+	list_for_each_entry(device, &fs_devices->seed->devices, dev_list) {
+		if (!device->name)
+			continue;
+		btrfs_scan_one_device(device->name->str, FMODE_READ,
+				      fs_info->bdev_holder, &old_fs_devices);
+	}
 
 	return 0;
 }
