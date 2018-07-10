@@ -1855,6 +1855,33 @@ static inline u64 btrfs_num_devices(struct btrfs_fs_info *fs_info)
 	return num_devices;
 }
 
+static struct btrfs_device *btrfs_get_device_for_delete(
+				struct btrfs_fs_info *fs_info,
+				const char *device_path, u64 devid)
+{
+	int ret;
+	struct btrfs_device *device;
+
+	ret = btrfs_check_raid_min_devices(fs_info,
+					   btrfs_num_devices(fs_info) - 1);
+	if (ret)
+		return ERR_PTR(ret);
+
+	ret = btrfs_find_device_by_devspec(fs_info, devid, device_path,
+					   &device);
+	if (ret)
+		return ERR_PTR(ret);
+
+	if (test_bit(BTRFS_DEV_STATE_REPLACE_TGT, &device->dev_state))
+		return ERR_PTR(BTRFS_ERROR_DEV_TGT_REPLACE);
+
+	if (test_bit(BTRFS_DEV_STATE_WRITEABLE, &device->dev_state) &&
+	    fs_info->fs_devices->rw_devices == 1)
+		return ERR_PTR(BTRFS_ERROR_DEV_ONLY_WRITABLE);
+
+	return device;
+}
+
 int btrfs_rm_device(struct btrfs_fs_info *fs_info, const char *device_path,
 		u64 devid)
 {
@@ -1868,25 +1895,9 @@ int btrfs_rm_device(struct btrfs_fs_info *fs_info, const char *device_path,
 
 	mutex_lock(&uuid_mutex);
 
-	num_devices = btrfs_num_devices(fs_info);
-
-	ret = btrfs_check_raid_min_devices(fs_info, num_devices - 1);
-	if (ret)
-		goto out;
-
-	ret = btrfs_find_device_by_devspec(fs_info, devid, device_path,
-					   &device);
-	if (ret)
-		goto out;
-
-	if (test_bit(BTRFS_DEV_STATE_REPLACE_TGT, &device->dev_state)) {
-		ret = BTRFS_ERROR_DEV_TGT_REPLACE;
-		goto out;
-	}
-
-	if (test_bit(BTRFS_DEV_STATE_WRITEABLE, &device->dev_state) &&
-	    fs_info->fs_devices->rw_devices == 1) {
-		ret = BTRFS_ERROR_DEV_ONLY_WRITABLE;
+	device = btrfs_get_device_for_delete(fs_info, device_path, devid);
+	if (IS_ERR(device)) {
+		ret = PTR_ERR(device);
 		goto out;
 	}
 
