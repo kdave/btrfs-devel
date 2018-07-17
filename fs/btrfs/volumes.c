@@ -934,8 +934,9 @@ void btrfs_free_extra_devids(struct btrfs_fs_devices *fs_devices, int step)
 {
 	struct btrfs_device *device, *next;
 	struct btrfs_device *latest_dev = NULL;
+	struct btrfs_fs_devices *parent_fs_devices = fs_devices;
 
-	mutex_lock(&uuid_mutex);
+	mutex_lock(&parent_fs_devices->device_list_mutex);
 again:
 	/* This is the initialized path, it is safe to release the devices. */
 	list_for_each_entry_safe(device, next, &fs_devices->devices, dev_list) {
@@ -989,8 +990,7 @@ again:
 	}
 
 	fs_devices->latest_bdev = latest_dev->bdev;
-
-	mutex_unlock(&uuid_mutex);
+	mutex_unlock(&parent_fs_devices->device_list_mutex);
 }
 
 static void free_device_rcu(struct rcu_head *head)
@@ -1062,12 +1062,12 @@ static int close_fs_devices(struct btrfs_fs_devices *fs_devices)
 	list_for_each_entry_safe(device, tmp, &fs_devices->devices, dev_list) {
 		btrfs_close_one_device(device);
 	}
-	mutex_unlock(&fs_devices->device_list_mutex);
-
 	WARN_ON(fs_devices->open_devices);
 	WARN_ON(fs_devices->rw_devices);
 	fs_devices->opened = 0;
 	fs_devices->seeding = 0;
+
+	mutex_unlock(&fs_devices->device_list_mutex);
 
 	return 0;
 }
@@ -1840,6 +1840,48 @@ void btrfs_assign_next_active_device(struct btrfs_fs_info *fs_info,
 		fs_info->fs_devices->latest_bdev = next_device->bdev;
 }
 
+/* Returns btrfs_fs_devices::num_devices excluding replace device if any */
+static inline u64 btrfs_num_devices(struct btrfs_fs_info *fs_info)
+{
+	u64 num_devices = fs_info->fs_devices->num_devices;
+
+	btrfs_dev_replace_read_lock(&fs_info->dev_replace);
+	if (btrfs_dev_replace_is_ongoing(&fs_info->dev_replace)) {
+		WARN_ON(num_devices < 1);
+		num_devices--;
+	}
+	btrfs_dev_replace_read_unlock(&fs_info->dev_replace);
+
+	return num_devices;
+}
+
+static struct btrfs_device *btrfs_get_device_for_delete(
+				struct btrfs_fs_info *fs_info,
+				const char *device_path, u64 devid)
+{
+	int ret;
+	struct btrfs_device *device;
+
+	ret = btrfs_check_raid_min_devices(fs_info,
+					   btrfs_num_devices(fs_info) - 1);
+	if (ret)
+		return ERR_PTR(ret);
+
+	ret = btrfs_find_device_by_devspec(fs_info, devid, device_path,
+					   &device);
+	if (ret)
+		return ERR_PTR(ret);
+
+	if (test_bit(BTRFS_DEV_STATE_REPLACE_TGT, &device->dev_state))
+		return ERR_PTR(BTRFS_ERROR_DEV_TGT_REPLACE);
+
+	if (test_bit(BTRFS_DEV_STATE_WRITEABLE, &device->dev_state) &&
+	    fs_info->fs_devices->rw_devices == 1)
+		return ERR_PTR(BTRFS_ERROR_DEV_ONLY_WRITABLE);
+
+	return device;
+}
+
 int btrfs_rm_device(struct btrfs_fs_info *fs_info, const char *device_path,
 		u64 devid)
 {
@@ -1853,31 +1895,9 @@ int btrfs_rm_device(struct btrfs_fs_info *fs_info, const char *device_path,
 
 	mutex_lock(&uuid_mutex);
 
-	num_devices = fs_devices->num_devices;
-	btrfs_dev_replace_read_lock(&fs_info->dev_replace);
-	if (btrfs_dev_replace_is_ongoing(&fs_info->dev_replace)) {
-		WARN_ON(num_devices < 1);
-		num_devices--;
-	}
-	btrfs_dev_replace_read_unlock(&fs_info->dev_replace);
-
-	ret = btrfs_check_raid_min_devices(fs_info, num_devices - 1);
-	if (ret)
-		goto out;
-
-	ret = btrfs_find_device_by_devspec(fs_info, devid, device_path,
-					   &device);
-	if (ret)
-		goto out;
-
-	if (test_bit(BTRFS_DEV_STATE_REPLACE_TGT, &device->dev_state)) {
-		ret = BTRFS_ERROR_DEV_TGT_REPLACE;
-		goto out;
-	}
-
-	if (test_bit(BTRFS_DEV_STATE_WRITEABLE, &device->dev_state) &&
-	    fs_info->fs_devices->rw_devices == 1) {
-		ret = BTRFS_ERROR_DEV_ONLY_WRITABLE;
+	device = btrfs_get_device_for_delete(fs_info, device_path, devid);
+	if (IS_ERR(device)) {
+		ret = PTR_ERR(device);
 		goto out;
 	}
 
@@ -2175,7 +2195,6 @@ int btrfs_find_device_by_devspec(struct btrfs_fs_info *fs_info, u64 devid,
 static int btrfs_prepare_sprout(struct btrfs_fs_info *fs_info)
 {
 	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices;
-	struct btrfs_fs_devices *old_devices;
 	struct btrfs_fs_devices *seed_devices;
 	struct btrfs_super_block *disk_super = fs_info->super_copy;
 	struct btrfs_device *device;
@@ -2189,21 +2208,13 @@ static int btrfs_prepare_sprout(struct btrfs_fs_info *fs_info)
 	if (IS_ERR(seed_devices))
 		return PTR_ERR(seed_devices);
 
-	old_devices = clone_fs_devices(fs_devices);
-	if (IS_ERR(old_devices)) {
-		kfree(seed_devices);
-		return PTR_ERR(old_devices);
-	}
-
-	list_add(&old_devices->fs_list, &fs_uuids);
-
 	memcpy(seed_devices, fs_devices, sizeof(*seed_devices));
 	seed_devices->opened = 1;
 	INIT_LIST_HEAD(&seed_devices->devices);
 	INIT_LIST_HEAD(&seed_devices->alloc_list);
 	mutex_init(&seed_devices->device_list_mutex);
 
-	mutex_lock(&fs_info->fs_devices->device_list_mutex);
+	mutex_lock(&fs_devices->device_list_mutex);
 	list_splice_init_rcu(&fs_devices->devices, &seed_devices->devices,
 			      synchronize_rcu);
 	list_for_each_entry(device, &seed_devices->devices, dev_list)
@@ -2223,11 +2234,23 @@ static int btrfs_prepare_sprout(struct btrfs_fs_info *fs_info)
 	generate_random_uuid(fs_devices->fsid);
 	memcpy(fs_info->fsid, fs_devices->fsid, BTRFS_FSID_SIZE);
 	memcpy(disk_super->fsid, fs_devices->fsid, BTRFS_FSID_SIZE);
-	mutex_unlock(&fs_info->fs_devices->device_list_mutex);
+	mutex_unlock(&fs_devices->device_list_mutex);
 
 	super_flags = btrfs_super_flags(disk_super) &
 		      ~BTRFS_SUPER_FLAG_SEEDING;
 	btrfs_set_super_flags(disk_super, super_flags);
+
+	/*
+	 * As the above code hijacked the original seed fs_devices, now
+	 * create a new one for the original seed FSID and its ok if the
+	 * scan fails, user can still scan from the cli.
+	 */
+	list_for_each_entry(device, &fs_devices->seed->devices, dev_list) {
+		if (!device->name)
+			continue;
+		btrfs_scan_one_device(device->name->str, FMODE_READ,
+				      fs_info->bdev_holder);
+	}
 
 	return 0;
 }
@@ -3716,13 +3739,8 @@ int btrfs_balance(struct btrfs_fs_info *fs_info,
 		}
 	}
 
-	num_devices = fs_info->fs_devices->num_devices;
-	btrfs_dev_replace_read_lock(&fs_info->dev_replace);
-	if (btrfs_dev_replace_is_ongoing(&fs_info->dev_replace)) {
-		BUG_ON(num_devices < 1);
-		num_devices--;
-	}
-	btrfs_dev_replace_read_unlock(&fs_info->dev_replace);
+	num_devices = btrfs_num_devices(fs_info);
+
 	allowed = BTRFS_AVAIL_ALLOC_BIT_SINGLE | BTRFS_BLOCK_GROUP_DUP;
 	if (num_devices > 1)
 		allowed |= (BTRFS_BLOCK_GROUP_RAID0 | BTRFS_BLOCK_GROUP_RAID1);
