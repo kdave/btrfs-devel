@@ -573,14 +573,31 @@ again:
 		}
 
 		/* Compression level is applied here and only here */
-		ret = btrfs_compress_pages(
-			compress_type | (fs_info->compress_level << 4),
-					   inode->i_mapping, start,
-					   pages,
-					   &nr_pages,
-					   &total_in,
-					   &total_compressed);
-
+		/*
+		 * Check if the upper bits are set, and if so,
+		 * take them as the compression level.
+		 * the inode compression level takes precendence, if set
+		 */
+		if ((compress_type & 0xF) == compress_type) {
+			ret = btrfs_compress_pages(
+				compress_type | (fs_info->compress_level << 4),
+						inode->i_mapping, start,
+						pages,
+						&nr_pages,
+						&total_in,
+						&total_compressed);
+		} else {
+			int compress_level = btrfs_compress_set_level(
+						compress_type & 0xF,
+						compress_type>>4);
+			ret = btrfs_compress_pages(
+				compress_type | (compress_level << 4),
+				inode->i_mapping, start,
+				pages,
+				&nr_pages,
+				&total_in,
+				&total_compressed);
+		}
 		if (!ret) {
 			unsigned long offset = offset_in_page(total_compressed);
 			struct page *page = pages[nr_pages - 1];

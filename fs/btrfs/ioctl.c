@@ -1414,7 +1414,11 @@ int btrfs_defrag_file(struct inode *inode, struct file *file,
 		return -EINVAL;
 
 	if (do_compress) {
-		if (range->compress_type >= BTRFS_NR_COMPRESS_TYPES)
+		/* 
+		* The bottom 4 bits of compress_type are for used for the 
+		* compression type, the other bits for the compression level 
+		*/
+		if ((range->compress_type & 0xF) >= BTRFS_NR_COMPRESS_TYPES)
 			return -EINVAL;
 		if (range->compress_type)
 			compress_type = range->compress_type;
@@ -1572,9 +1576,9 @@ int btrfs_defrag_file(struct inode *inode, struct file *file,
 			filemap_flush(inode->i_mapping);
 	}
 
-	if (range->compress_type == BTRFS_COMPRESS_LZO) {
+	if ((range->compress_type & 0xF) == BTRFS_COMPRESS_LZO) {
 		btrfs_set_fs_incompat(fs_info, COMPRESS_LZO);
-	} else if (range->compress_type == BTRFS_COMPRESS_ZSTD) {
+	} else if ((range->compress_type & 0xF) == BTRFS_COMPRESS_ZSTD) {
 		btrfs_set_fs_incompat(fs_info, COMPRESS_ZSTD);
 	}
 

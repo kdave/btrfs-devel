@@ -1201,7 +1201,7 @@ static int btrfs_decompress_bio(struct compressed_bio *cb)
 {
 	struct list_head *workspace;
 	int ret;
-	int type = cb->compress_type;
+	int type = cb->compress_type & 0xF;
 
 	workspace = get_workspace(type, 0);
 	ret = compression_decompress_bio(type, workspace, cb);
@@ -1220,7 +1220,7 @@ int btrfs_decompress(int type, unsigned char *data_in, struct page *dest_page,
 {
 	struct list_head *workspace;
 	int ret;
-
+	type = type & 0xF;
 	workspace = get_workspace(type, 0);
 	ret = compression_decompress(type, workspace, data_in, dest_page,
 				     start_byte, srclen, destlen);
