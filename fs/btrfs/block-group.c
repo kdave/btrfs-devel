@@ -831,15 +831,20 @@ static void clear_avail_alloc_bits(struct btrfs_fs_info *fs_info, u64 flags)
  *            in the whole filesystem
  *
  * - RAID1C34 - same as above for RAID1C3 and RAID1C4 block groups
+ *
+ * - RAID10C34 - same as above for RAID10C3 and RAID10C4 block groups
  */
 static void clear_incompat_bg_bits(struct btrfs_fs_info *fs_info, u64 flags)
 {
 	bool found_raid56 = false;
 	bool found_raid1c34 = false;
+	bool found_raid10c34 = false;
 
 	if ((flags & BTRFS_BLOCK_GROUP_RAID56_MASK) ||
 	    (flags & BTRFS_BLOCK_GROUP_RAID1C3) ||
-	    (flags & BTRFS_BLOCK_GROUP_RAID1C4)) {
+	    (flags & BTRFS_BLOCK_GROUP_RAID1C4) ||
+	    (flags & BTRFS_BLOCK_GROUP_RAID10C3) ||
+	    (flags & BTRFS_BLOCK_GROUP_RAID10C4)) {
 		struct list_head *head = &fs_info->space_info;
 		struct btrfs_space_info *sinfo;
 
@@ -853,12 +858,18 @@ static void clear_incompat_bg_bits(struct btrfs_fs_info *fs_info, u64 flags)
 				found_raid1c34 = true;
 			if (!list_empty(&sinfo->block_groups[BTRFS_RAID_RAID1C4]))
 				found_raid1c34 = true;
+			if (!list_empty(&sinfo->block_groups[BTRFS_RAID_RAID10C3]))
+				found_raid10c34 = true;
+			if (!list_empty(&sinfo->block_groups[BTRFS_RAID_RAID10C4]))
+				found_raid10c34 = true;
 			up_read(&sinfo->groups_sem);
 		}
 		if (!found_raid56)
 			btrfs_clear_fs_incompat(fs_info, RAID56);
 		if (!found_raid1c34)
 			btrfs_clear_fs_incompat(fs_info, RAID1C34);
+		if (!found_raid10c34)
+			btrfs_clear_fs_incompat(fs_info, RAID10C34);
 	}
 }
 
@@ -2264,7 +2275,7 @@ int btrfs_read_block_groups(struct btrfs_fs_info *info)
 		}
 
 		if (!(btrfs_get_alloc_profile(info, space_info->flags) &
-		      (BTRFS_BLOCK_GROUP_RAID10 |
+		      (BTRFS_BLOCK_GROUP_RAID10_MASK |
 		       BTRFS_BLOCK_GROUP_RAID1_MASK |
 		       BTRFS_BLOCK_GROUP_RAID56_MASK |
 		       BTRFS_BLOCK_GROUP_DUP)))

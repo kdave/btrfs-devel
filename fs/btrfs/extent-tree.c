@@ -4376,7 +4376,7 @@ search:
 			u64 extra = BTRFS_BLOCK_GROUP_DUP |
 				BTRFS_BLOCK_GROUP_RAID1_MASK |
 				BTRFS_BLOCK_GROUP_RAID56_MASK |
-				BTRFS_BLOCK_GROUP_RAID10;
+				BTRFS_BLOCK_GROUP_RAID10_MASK;
 
 			/*
 			 * if they asked for extra copies and this block group
