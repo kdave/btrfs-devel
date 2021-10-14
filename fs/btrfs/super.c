@@ -2248,7 +2248,7 @@ static inline int btrfs_calc_avail_data_space(struct btrfs_fs_info *fs_info,
 	else if (type & BTRFS_BLOCK_GROUP_RAID1_MASK)
 		num_stripes = rattr->ncopies;
 	else if (type & BTRFS_BLOCK_GROUP_RAID10)
-		num_stripes = 4;
+		num_stripes = nr_devices;
 
 	/* Adjust for more than 1 stripe per device */
 	min_stripe_size = rattr->dev_stripes * BTRFS_STRIPE_LEN;
