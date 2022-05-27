@@ -841,6 +841,8 @@ static ssize_t btrfs_label_store(struct kobject *kobj,
 	memcpy(fs_info->super_copy->label, buf, p_len);
 	spin_unlock(&fs_info->super_lock);
 
+	/* Fixme: if label is empty, reset msgid_type to default */
+
 	/*
 	 * We don't want to do full transaction commit from inside sysfs
 	 */
@@ -1093,6 +1095,43 @@ static ssize_t btrfs_bg_reclaim_threshold_store(struct kobject *kobj,
 BTRFS_ATTR_RW(, bg_reclaim_threshold, btrfs_bg_reclaim_threshold_show,
 	      btrfs_bg_reclaim_threshold_store);
 
+static const char *msgid_strings[] = {
+	[BTRFS_MSGID_DEVICE]	= "device",
+	[BTRFS_MSGID_UUID]	= "uuid",
+	[BTRFS_MSGID_UUID_SHORT] = "uuid-short",
+	[BTRFS_MSGID_LABEL]	= "label",
+};
+
+static ssize_t btrfs_msgid_show(struct kobject *kobj,
+				struct kobj_attribute *a,
+				char *buf)
+{
+	struct btrfs_fs_info *fs_info = to_fs_info(kobj);
+
+	return sysfs_emit(buf, "%s\n", msgid_strings[fs_info->msgid_type]);
+}
+
+static ssize_t btrfs_msgid_store(struct kobject *kobj,
+				 struct kobj_attribute *a,
+				 const char *buf, size_t len)
+{
+	struct btrfs_fs_info *fs_info = to_fs_info(kobj);
+	int i;
+
+	for (i = 0; i < BTRFS_MSGID_COUNT; i++) {
+		/* Fixme: if label is empty do a fallback */
+		if (strmatch(buf, msgid_strings[i])) {
+			WRITE_ONCE(fs_info->msgid_type, i);
+			break;
+		}
+	}
+	if (i == BTRFS_MSGID_COUNT)
+		return -EINVAL;
+
+	return len;
+}
+BTRFS_ATTR_RW(, msgid, btrfs_msgid_show, btrfs_msgid_store);
+
 /*
  * Per-filesystem information and stats.
  *
@@ -1110,6 +1149,7 @@ static const struct attribute *btrfs_attrs[] = {
 	BTRFS_ATTR_PTR(, generation),
 	BTRFS_ATTR_PTR(, read_policy),
 	BTRFS_ATTR_PTR(, bg_reclaim_threshold),
+	BTRFS_ATTR_PTR(, msgid),
 	NULL,
 };
 

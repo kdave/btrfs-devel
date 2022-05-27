@@ -642,6 +642,14 @@ enum {
 #endif
 };
 
+enum btrfs_msgid_type {
+	BTRFS_MSGID_DEVICE,
+	BTRFS_MSGID_UUID,
+	BTRFS_MSGID_UUID_SHORT,
+	BTRFS_MSGID_LABEL,
+	BTRFS_MSGID_COUNT
+};
+
 /*
  * Exclusive operations (device replace, resize, device add/remove, balance)
  */
@@ -739,6 +747,8 @@ struct btrfs_fs_info {
 	 * so it is also safe.
 	 */
 	u64 max_inline;
+
+	enum btrfs_msgid_type msgid_type;
 
 	struct btrfs_transaction *running_transaction;
 	wait_queue_head_t transaction_throttle;

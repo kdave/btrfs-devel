@@ -290,10 +290,37 @@ void __cold _btrfs_printk(const struct btrfs_fs_info *fs_info, const char *fmt, 
 	if (__ratelimit(ratelimit)) {
 		if (fs_info) {
 			char statestr[STATE_STRING_BUF_LEN];
+			char *idtype;
+			char id[64] = { 0 };
+			bool short_fsid = false;
+
+			switch (READ_ONCE(fs_info->msgid_type)) {
+			default:
+			case BTRFS_MSGID_DEVICE:
+				idtype = "device";
+				scnprintf(id, sizeof(id), "%s", fs_info->sb->s_id);
+				break;
+			case BTRFS_MSGID_UUID_SHORT:
+				short_fsid = true;
+				fallthrough;
+			case BTRFS_MSGID_UUID:
+				idtype = "fsid";
+				scnprintf(id, sizeof(id), "%pU",
+					  fs_info->fs_devices->fsid);
+				if (short_fsid)
+					id[13] = 0;
+				break;
+			case BTRFS_MSGID_LABEL:
+				idtype = "label";
+				/* Fixme: first 64 from label */
+				scnprintf(id, sizeof(id), "%s",
+					  fs_info->super_copy->label);
+				break;
+			}
 
 			btrfs_state_to_string(fs_info, statestr);
-			_printk("%sBTRFS %s (device %s%s): %pV\n", lvl, type,
-				fs_info->sb->s_id, statestr, &vaf);
+			_printk("%sBTRFS %s (%s %s%s): %pV\n", lvl, type,
+				idtype, id, statestr, &vaf);
 		} else {
 			_printk("%sBTRFS %s: %pV\n", lvl, type, &vaf);
 		}
