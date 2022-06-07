@@ -400,6 +400,8 @@ void btrfs_free_device(struct btrfs_device *device)
 	rcu_string_free(device->name);
 	extent_io_tree_release(&device->alloc_state);
 	btrfs_destroy_dev_zone_info(device);
+	for (int i = 0; i < BTRFS_SUPER_MIRROR_MAX; i++)
+		__free_page(device->sb_write_page[i]);
 	kfree(device);
 }
 
@@ -6899,6 +6901,16 @@ struct btrfs_device *btrfs_alloc_device(struct btrfs_fs_info *fs_info,
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (!dev)
 		return ERR_PTR(-ENOMEM);
+
+	for (int i = 0; i < BTRFS_SUPER_MIRROR_MAX; i++) {
+		dev->sb_write_page[i] = alloc_page(GFP_KERNEL);
+		if (!dev->sb_write_page[i]) {
+			while (--i >= 0)
+				__free_page(dev->sb_write_page[i]);
+			kfree(dev);
+			return ERR_PTR(-ENOMEM);
+		}
+	}
 
 	INIT_LIST_HEAD(&dev->dev_list);
 	INIT_LIST_HEAD(&dev->dev_alloc_list);

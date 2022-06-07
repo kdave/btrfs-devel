@@ -10,6 +10,7 @@
 #include <linux/sort.h>
 #include <linux/btrfs.h>
 #include "async-thread.h"
+#include "disk-io.h"
 
 #define BTRFS_MAX_DATA_CHUNK_SIZE	(10ULL * SZ_1G)
 
@@ -158,6 +159,8 @@ struct btrfs_device {
 	/* Bio used for flushing device barriers */
 	struct bio flush_bio;
 	struct completion flush_wait;
+	/* Temporary pages for writing the super block copies */
+	struct page *sb_write_page[BTRFS_SUPER_MIRROR_MAX];
 
 	/* per-device scrub information */
 	struct scrub_ctx *scrub_ctx;
