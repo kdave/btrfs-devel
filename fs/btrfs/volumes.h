@@ -163,6 +163,9 @@ struct btrfs_device {
 	struct page *sb_write_page[BTRFS_SUPER_MIRROR_MAX];
 	/* Completions of the super block write bios */
 	struct completion sb_write_wait[BTRFS_SUPER_MIRROR_MAX];
+	/* Bio for writing super block pages */
+	struct bio sb_write_bio[BTRFS_SUPER_MIRROR_MAX];
+	struct bio_vec sb_write_bvec[BTRFS_SUPER_MIRROR_MAX];
 
 	/* per-device scrub information */
 	struct scrub_ctx *scrub_ctx;

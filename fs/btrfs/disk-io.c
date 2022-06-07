@@ -3916,7 +3916,7 @@ static void btrfs_end_super_write(struct bio *bio)
 		complete(completion);
 	}
 
-	bio_put(bio);
+	bio_uninit(bio);
 }
 
 struct btrfs_super_block *btrfs_read_dev_one_super(struct block_device *bdev,
@@ -4054,9 +4054,9 @@ static int write_dev_supers(struct btrfs_device *device,
 		 * to do I/O, so we don't lose the ability to do integrity
 		 * checking.
 		 */
-		bio = bio_alloc(device->bdev, 1,
-				REQ_OP_WRITE | REQ_SYNC | REQ_META | REQ_PRIO,
-				GFP_NOFS);
+		bio = &device->sb_write_bio[i];
+		bio_init(bio, device->bdev, &device->sb_write_bvec[i], 1,
+			 REQ_OP_WRITE | REQ_SYNC | REQ_META | REQ_PRIO);
 		bio->bi_iter.bi_sector = bytenr >> SECTOR_SHIFT;
 		bio->bi_private = device;
 		bio->bi_end_io = btrfs_end_super_write;
