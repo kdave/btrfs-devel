@@ -52,6 +52,25 @@ struct workspace {
 	zstd_out_buffer out_buf;
 };
 
+static const int b2z[] = {
+	 [0] =  0,
+	 [1] = -4,
+	 [2] = -3,
+	 [3] = -2,
+	 [4] = -1,
+	 [5] =  1,
+	 [6] =  2,
+	 [7] =  3,
+	 [8] =  4,
+	 [9] =  5,
+	[10] =  7,
+	[11] =  9,
+	[12] =  10,
+	[13] =  11,
+	[14] =  13,
+	[15] =  15,
+};
+
 /*
  * Zstd Workspace Management
  *
@@ -159,8 +178,9 @@ static void zstd_calc_ws_mem_sizes(void)
 	unsigned int level;
 
 	for (level = 1; level <= ZSTD_BTRFS_MAX_LEVEL; level++) {
+		const int zstd_level = b2z[level];
 		zstd_parameters params =
-			zstd_get_btrfs_parameters(level, ZSTD_BTRFS_MAX_INPUT);
+			zstd_get_btrfs_parameters(zstd_level, ZSTD_BTRFS_MAX_INPUT);
 		size_t level_size =
 			max_t(size_t,
 			      zstd_cstream_workspace_bound(&params.cParams),
