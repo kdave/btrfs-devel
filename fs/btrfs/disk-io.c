@@ -3895,6 +3895,8 @@ static void btrfs_end_super_write(struct bio *bio)
 	struct page *page;
 
 	bio_for_each_segment_all(bvec, bio, iter_all) {
+		struct completion *completion;
+
 		page = bvec->bv_page;
 
 		if (bio->bi_status) {
@@ -3910,7 +3912,8 @@ static void btrfs_end_super_write(struct bio *bio)
 			SetPageUptodate(page);
 		}
 
-		unlock_page(page);
+		completion = (struct completion *)page_private(page);
+		complete(completion);
 	}
 
 	bio_put(bio);
@@ -4037,10 +4040,12 @@ static int write_dev_supers(struct btrfs_device *device,
 		 * and submitted for write. Page is unlocked after IO finishes.
 		 * No page references are needed, write error is returned as
 		 * page Error bit.
+		 * Bio completion is in page private data.
 		 */
 		page = device->sb_write_page[i];
 		ClearPageError(page);
-		lock_page(page);
+		init_completion(&device->sb_write_wait[i]);
+		set_page_private(page, (unsigned long)&device->sb_write_wait[i]);
 
 		memcpy(page_address(page), sb, BTRFS_SUPER_INFO_SIZE);
 
@@ -4110,8 +4115,7 @@ static int wait_dev_supers(struct btrfs_device *device, int max_mirrors)
 			break;
 
 		page = device->sb_write_page[i];
-		/* Page is submitted locked and unlocked once the IO completes */
-		wait_on_page_locked(page);
+		wait_for_completion_io(&device->sb_write_wait[i]);
 		if (PageError(page)) {
 			errors++;
 			if (i == 0)
