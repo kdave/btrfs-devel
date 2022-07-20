@@ -3904,18 +3904,15 @@ static void btrfs_end_super_write(struct bio *bio)
 				"lost page write due to IO error on %s (%d)",
 				rcu_str_deref(device->name),
 				blk_status_to_errno(bio->bi_status));
-			ClearPageUptodate(page);
-			SetPageError(page);
 			btrfs_dev_stat_inc_and_print(device,
 						     BTRFS_DEV_STAT_WRITE_ERRS);
-		} else {
-			SetPageUptodate(page);
 		}
 
 		completion = (struct completion *)page_private(page);
 		complete(completion);
 	}
 
+	/* This does not clear bio->bi_status that's used for error handling. */
 	bio_uninit(bio);
 }
 
@@ -4043,7 +4040,6 @@ static int write_dev_supers(struct btrfs_device *device,
 		 * Bio completion is in page private data.
 		 */
 		page = device->sb_write_page[i];
-		ClearPageError(page);
 		init_completion(&device->sb_write_wait[i]);
 		set_page_private(page, (unsigned long)&device->sb_write_wait[i]);
 
@@ -4099,8 +4095,6 @@ static int wait_dev_supers(struct btrfs_device *device, int max_mirrors)
 		max_mirrors = BTRFS_SUPER_MIRROR_MAX;
 
 	for (i = 0; i < max_mirrors; i++) {
-		struct page *page;
-
 		ret = btrfs_sb_log_location(device, i, READ, &bytenr);
 		if (ret == -ENOENT) {
 			break;
@@ -4114,9 +4108,8 @@ static int wait_dev_supers(struct btrfs_device *device, int max_mirrors)
 		    device->commit_total_bytes)
 			break;
 
-		page = device->sb_write_page[i];
 		wait_for_completion_io(&device->sb_write_wait[i]);
-		if (PageError(page)) {
+		if (device->sb_write_bio[i].bi_status) {
 			errors++;
 			if (i == 0)
 				primary_failed = true;
