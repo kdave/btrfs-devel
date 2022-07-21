@@ -1263,7 +1263,7 @@ void btrfs_release_disk_super(struct btrfs_super_block *super)
 {
 	struct page *page = virt_to_page(super);
 
-	put_page(page);
+	__free_page(page);
 }
 
 static struct btrfs_super_block *btrfs_read_disk_super(struct block_device *bdev,
