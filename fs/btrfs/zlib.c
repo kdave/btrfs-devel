@@ -33,7 +33,7 @@ struct workspace {
 
 static struct workspace_manager wsm;
 
-struct list_head *zlib_get_workspace(unsigned int level)
+struct list_head *zlib_get_workspace(int level)
 {
 	struct list_head *ws = btrfs_get_workspace(BTRFS_COMPRESS_ZLIB, level);
 	struct workspace *workspace = list_entry(ws, struct workspace, list);
@@ -52,7 +52,7 @@ void zlib_free_workspace(struct list_head *ws)
 	kfree(workspace);
 }
 
-struct list_head *zlib_alloc_workspace(unsigned int level)
+struct list_head *zlib_alloc_workspace(int level)
 {
 	struct workspace *workspace;
 	int workspacesize;

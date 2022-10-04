@@ -25,10 +25,11 @@
 #define ZSTD_BTRFS_MAX_INPUT (1 << ZSTD_BTRFS_MAX_WINDOWLOG)
 #define ZSTD_BTRFS_DEFAULT_LEVEL 3
 #define ZSTD_BTRFS_MAX_LEVEL 15
+#define ZSTD_BTRFS_MIN_LEVEL -15
 /* 307s to avoid pathologically clashing with transaction commit */
 #define ZSTD_BTRFS_RECLAIM_JIFFIES (307 * HZ)
 
-static zstd_parameters zstd_get_btrfs_parameters(unsigned int level,
+static zstd_parameters zstd_get_btrfs_parameters(int level,
 						 size_t src_len)
 {
 	zstd_parameters params = zstd_get_params(level, src_len);
@@ -43,8 +44,8 @@ struct workspace {
 	void *mem;
 	size_t size;
 	char *buf;
-	unsigned int level;
-	unsigned int req_level;
+	int level;
+	int req_level;
 	unsigned long last_used; /* jiffies */
 	struct list_head list;
 	struct list_head lru_list;
@@ -92,7 +93,7 @@ static inline struct workspace *list_to_workspace(struct list_head *list)
 }
 
 void zstd_free_workspace(struct list_head *ws);
-struct list_head *zstd_alloc_workspace(unsigned int level);
+struct list_head *zstd_alloc_workspace(int level);
 
 /**
  * Timer callback to free unused workspaces.
@@ -119,7 +120,7 @@ static void zstd_reclaim_timer_fn(struct timer_list *timer)
 	list_for_each_prev_safe(pos, next, &wsm.lru_list) {
 		struct workspace *victim = container_of(pos, struct workspace,
 							lru_list);
-		unsigned int level;
+		int level;
 
 		if (time_after(victim->last_used, reclaim_threshold))
 			break;
@@ -156,9 +157,9 @@ static void zstd_reclaim_timer_fn(struct timer_list *timer)
 static void zstd_calc_ws_mem_sizes(void)
 {
 	size_t max_size = 0;
-	unsigned int level;
+	int level;
 
-	for (level = 1; level <= ZSTD_BTRFS_MAX_LEVEL; level++) {
+	for (level = ZSTD_BTRFS_MIN_LEVEL; level <= ZSTD_BTRFS_MAX_LEVEL; level++) {
 		zstd_parameters params =
 			zstd_get_btrfs_parameters(level, ZSTD_BTRFS_MAX_INPUT);
 		size_t level_size =
@@ -184,7 +185,7 @@ void zstd_init_workspace_manager(void)
 	timer_setup(&wsm.timer, zstd_reclaim_timer_fn, 0);
 
 	INIT_LIST_HEAD(&wsm.lru_list);
-	for (i = 0; i < ZSTD_BTRFS_MAX_LEVEL; i++)
+	for (i = ZSTD_BTRFS_MIN_LEVEL; i < ZSTD_BTRFS_MAX_LEVEL; i++)
 		INIT_LIST_HEAD(&wsm.idle_ws[i]);
 
 	ws = zstd_alloc_workspace(ZSTD_BTRFS_MAX_LEVEL);
@@ -203,7 +204,7 @@ void zstd_cleanup_workspace_manager(void)
 	int i;
 
 	spin_lock_bh(&wsm.lock);
-	for (i = 0; i < ZSTD_BTRFS_MAX_LEVEL; i++) {
+	for (i = ZSTD_BTRFS_MIN_LEVEL; i < ZSTD_BTRFS_MAX_LEVEL; i++) {
 		while (!list_empty(&wsm.idle_ws[i])) {
 			workspace = container_of(wsm.idle_ws[i].next,
 						 struct workspace, list);
@@ -228,7 +229,7 @@ void zstd_cleanup_workspace_manager(void)
  * offer the opportunity to reclaim the workspace in favor of allocating an
  * appropriately sized one in the future.
  */
-static struct list_head *zstd_find_workspace(unsigned int level)
+static struct list_head *zstd_find_workspace(int level)
 {
 	struct list_head *ws;
 	struct workspace *workspace;
@@ -264,7 +265,7 @@ static struct list_head *zstd_find_workspace(unsigned int level)
  * attempt to allocate a new workspace.  If we fail to allocate one due to
  * memory pressure, go to sleep waiting for the max level workspace to free up.
  */
-struct list_head *zstd_get_workspace(unsigned int level)
+struct list_head *zstd_get_workspace(int level)
 {
 	struct list_head *ws;
 	unsigned int nofs_flag;
@@ -344,7 +345,7 @@ void zstd_free_workspace(struct list_head *ws)
 	kfree(workspace);
 }
 
-struct list_head *zstd_alloc_workspace(unsigned int level)
+struct list_head *zstd_alloc_workspace(int level)
 {
 	struct workspace *workspace;
 

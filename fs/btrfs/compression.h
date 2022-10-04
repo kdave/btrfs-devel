@@ -72,7 +72,7 @@ static inline unsigned int btrfs_compress_type(unsigned int type_level)
 	return (type_level & 0xF);
 }
 
-static inline unsigned int btrfs_compress_level(unsigned int type_level)
+static inline int btrfs_compress_level(unsigned int type_level)
 {
 	return ((type_level & 0xF0) >> 4);
 }
@@ -101,7 +101,7 @@ blk_status_t btrfs_submit_compressed_write(struct btrfs_inode *inode, u64 start,
 void btrfs_submit_compressed_read(struct inode *inode, struct bio *bio,
 				  int mirror_num);
 
-unsigned int btrfs_compress_str2level(unsigned int type, const char *str);
+int btrfs_compress_str2level(unsigned int type, const char *str);
 
 enum btrfs_compression_type {
 	BTRFS_COMPRESS_NONE  = 0,
@@ -122,14 +122,14 @@ struct workspace_manager {
 	wait_queue_head_t ws_wait;
 };
 
-struct list_head *btrfs_get_workspace(int type, unsigned int level);
+struct list_head *btrfs_get_workspace(int type, int level);
 void btrfs_put_workspace(int type, struct list_head *ws);
 
 struct btrfs_compress_op {
 	struct workspace_manager *workspace_manager;
 	/* Maximum level supported by the compression algorithm */
-	unsigned int max_level;
-	unsigned int default_level;
+	int max_level;
+	 int default_level;
 };
 
 /* The heuristic workspaces are managed via the 0th workspace manager */
@@ -152,9 +152,9 @@ int zlib_decompress_bio(struct list_head *ws, struct compressed_bio *cb);
 int zlib_decompress(struct list_head *ws, unsigned char *data_in,
 		struct page *dest_page, unsigned long start_byte, size_t srclen,
 		size_t destlen);
-struct list_head *zlib_alloc_workspace(unsigned int level);
+struct list_head *zlib_alloc_workspace(int level);
 void zlib_free_workspace(struct list_head *ws);
-struct list_head *zlib_get_workspace(unsigned int level);
+struct list_head *zlib_get_workspace(int level);
 
 int lzo_compress_pages(struct list_head *ws, struct address_space *mapping,
 		u64 start, struct page **pages, unsigned long *out_pages,
@@ -163,7 +163,7 @@ int lzo_decompress_bio(struct list_head *ws, struct compressed_bio *cb);
 int lzo_decompress(struct list_head *ws, unsigned char *data_in,
 		struct page *dest_page, unsigned long start_byte, size_t srclen,
 		size_t destlen);
-struct list_head *lzo_alloc_workspace(unsigned int level);
+struct list_head *lzo_alloc_workspace(int level);
 void lzo_free_workspace(struct list_head *ws);
 
 int zstd_compress_pages(struct list_head *ws, struct address_space *mapping,
@@ -175,9 +175,9 @@ int zstd_decompress(struct list_head *ws, unsigned char *data_in,
 		size_t destlen);
 void zstd_init_workspace_manager(void);
 void zstd_cleanup_workspace_manager(void);
-struct list_head *zstd_alloc_workspace(unsigned int level);
+struct list_head *zstd_alloc_workspace(int level);
 void zstd_free_workspace(struct list_head *ws);
-struct list_head *zstd_get_workspace(unsigned int level);
+struct list_head *zstd_get_workspace(int level);
 void zstd_put_workspace(struct list_head *ws);
 
 #endif
