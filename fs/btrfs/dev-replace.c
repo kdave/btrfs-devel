@@ -302,7 +302,8 @@ static int btrfs_init_dev_replace_tgtdev(struct btrfs_fs_info *fs_info,
 		ret = -ENOMEM;
 		goto error;
 	}
-	rcu_assign_pointer(device->name, name);
+
+	set_device_name(device, name);
 	ret = lookup_bdev(device_path, &device->devt);
 	if (ret)
 		goto error;

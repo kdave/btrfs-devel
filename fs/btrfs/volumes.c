@@ -854,7 +854,7 @@ static noinline struct btrfs_device *device_list_add(const char *path,
 			mutex_unlock(&fs_devices->device_list_mutex);
 			return ERR_PTR(-ENOMEM);
 		}
-		rcu_assign_pointer(device->name, name);
+		set_device_name(device, name);
 		device->devt = path_devt;
 
 		list_add_rcu(&device->dev_list, &fs_devices->devices);
@@ -945,7 +945,7 @@ static noinline struct btrfs_device *device_list_add(const char *path,
 			return ERR_PTR(-ENOMEM);
 		}
 		rcu_string_free(device->name);
-		rcu_assign_pointer(device->name, name);
+		set_device_name(device, name);
 		if (test_bit(BTRFS_DEV_STATE_MISSING, &device->dev_state)) {
 			fs_devices->missing_devices--;
 			clear_bit(BTRFS_DEV_STATE_MISSING, &device->dev_state);
@@ -1008,7 +1008,7 @@ static struct btrfs_fs_devices *clone_fs_devices(struct btrfs_fs_devices *orig)
 				ret = -ENOMEM;
 				goto error;
 			}
-			rcu_assign_pointer(device->name, name);
+			set_device_name(device, name);
 		}
 
 		list_add(&device->dev_list, &fs_devices->devices);
@@ -2634,7 +2634,7 @@ int btrfs_init_new_device(struct btrfs_fs_info *fs_info, const char *device_path
 		ret = -ENOMEM;
 		goto error_free_device;
 	}
-	rcu_assign_pointer(device->name, name);
+	set_device_name(device, name);
 
 	device->fs_info = fs_info;
 	device->bdev = bdev;
@@ -8417,4 +8417,9 @@ int __init btrfs_bioset_init(void)
 void __cold btrfs_bioset_exit(void)
 {
 	bioset_exit(&btrfs_bioset);
+}
+
+void set_device_name(struct btrfs_device *device, struct rcu_string *name)
+{
+	rcu_assign_pointer(device->name, name);
 }
