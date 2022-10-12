@@ -858,7 +858,7 @@ static int scrub_print_warning_inode(u64 inum, u64 offset, u64 root,
 	 * hold all of the paths here
 	 */
 	for (i = 0; i < ipath->fspath->elem_cnt; ++i)
-		btrfs_warn_in_rcu(fs_info,
+		btrfs_warn(fs_info,
 "%s at logical %llu on dev %s, physical %llu, root %llu, inode %llu, offset %llu, length %u, links %u (path: %s)",
 				  swarn->errstr, swarn->logical,
 				  swarn->dev->name,
@@ -872,7 +872,7 @@ static int scrub_print_warning_inode(u64 inum, u64 offset, u64 root,
 	return 0;
 
 err:
-	btrfs_warn_in_rcu(fs_info,
+	btrfs_warn(fs_info,
 			  "%s at logical %llu on dev %s, physical %llu, root %llu, inode %llu, offset %llu: path resolving failed with ret=%d",
 			  swarn->errstr, swarn->logical,
 			  swarn->dev->name,
@@ -906,7 +906,7 @@ static void scrub_print_warning(const char *errstr, struct scrub_block *sblock)
 
 	/* Super block error, no need to search extent tree. */
 	if (sblock->sectors[0]->flags & BTRFS_EXTENT_FLAG_SUPER) {
-		btrfs_warn_in_rcu(fs_info, "%s on device %s, physical %llu",
+		btrfs_warn(fs_info, "%s on device %s, physical %llu",
 			errstr, dev->name,
 			sblock->physical);
 		return;
@@ -937,7 +937,7 @@ static void scrub_print_warning(const char *errstr, struct scrub_block *sblock)
 			ret = tree_backref_for_extent(&ptr, eb, &found_key, ei,
 						      item_size, &ref_root,
 						      &ref_level);
-			btrfs_warn_in_rcu(fs_info,
+			btrfs_warn(fs_info,
 "%s at logical %llu on dev %s, physical %llu: metadata %s (level %d) in tree %llu",
 				errstr, swarn.logical,
 				dev->name,
@@ -1355,7 +1355,7 @@ corrected_error:
 			sctx->stat.corrected_errors++;
 			sblock_to_check->data_corrected = 1;
 			spin_unlock(&sctx->stat_lock);
-			btrfs_err_rl_in_rcu(fs_info,
+			btrfs_err_rl(fs_info,
 				"fixed up error at logical %llu on dev %s",
 				logical, dev->name);
 		}
@@ -1364,7 +1364,7 @@ did_not_correct_error:
 		spin_lock(&sctx->stat_lock);
 		sctx->stat.uncorrectable_errors++;
 		spin_unlock(&sctx->stat_lock);
-		btrfs_err_rl_in_rcu(fs_info,
+		btrfs_err_rl(fs_info,
 			"unable to fixup (regular) error at logical %llu on dev %s",
 			logical, dev->name);
 	}
@@ -2310,14 +2310,14 @@ static void scrub_missing_raid56_worker(struct work_struct *work)
 		spin_lock(&sctx->stat_lock);
 		sctx->stat.read_errors++;
 		spin_unlock(&sctx->stat_lock);
-		btrfs_err_rl_in_rcu(fs_info,
+		btrfs_err_rl(fs_info,
 			"IO error rebuilding logical %llu for dev %s",
 			logical, dev->name);
 	} else if (sblock->header_error || sblock->checksum_error) {
 		spin_lock(&sctx->stat_lock);
 		sctx->stat.uncorrectable_errors++;
 		spin_unlock(&sctx->stat_lock);
-		btrfs_err_rl_in_rcu(fs_info,
+		btrfs_err_rl(fs_info,
 			"failed to rebuild valid logical %llu for dev %s",
 			logical, dev->name);
 	} else {
@@ -4288,7 +4288,7 @@ int btrfs_scrub_dev(struct btrfs_fs_info *fs_info, u64 devid, u64 start,
 	if (!is_dev_replace && !readonly &&
 	    !test_bit(BTRFS_DEV_STATE_WRITEABLE, &dev->dev_state)) {
 		mutex_unlock(&fs_info->fs_devices->device_list_mutex);
-		btrfs_err_in_rcu(fs_info,
+		btrfs_err(fs_info,
 			"scrub on devid %llu: filesystem on %s is not writable",
 				 devid, dev->name);
 		ret = -EROFS;
