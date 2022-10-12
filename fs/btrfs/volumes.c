@@ -406,6 +406,8 @@ void btrfs_free_device(struct btrfs_device *device)
 {
 	WARN_ON(!list_empty(&device->post_commit_list));
 	kfree(device->name);
+	printk(KERN_ERR "DBG: final free 0x%lx\n", (unsigned long)device->name);
+	device->name = NULL;
 	extent_io_tree_release(&device->alloc_state);
 	btrfs_destroy_dev_zone_info(device);
 	kfree(device);
@@ -950,7 +952,9 @@ static noinline struct btrfs_device *device_list_add(const char *path,
 			mutex_unlock(&fs_devices->device_list_mutex);
 			return ERR_PTR(-ENOMEM);
 		}
+		printk(KERN_ERR "DBG: device_list_add free 0x%lx\n", (unsigned long)device->name);
 		kfree(device->name);
+		device->name = NULL;
 		set_device_name(device, name);
 		if (test_bit(BTRFS_DEV_STATE_MISSING, &device->dev_state)) {
 			fs_devices->missing_devices--;
@@ -8429,6 +8433,9 @@ void set_device_name(struct btrfs_device *device, struct rcu_string *name)
 {
 	spin_lock(&device_name_lock);
 	/* Yoink the rcu_string internal value */
+	printk(KERN_ERR "DBG: old name 0x%lx, new name 0x%lx\n",
+			(unsigned long)device->name,
+			(unsigned long)name->str);
 	device->name = name->str;
 	spin_unlock(&device_name_lock);
 }
