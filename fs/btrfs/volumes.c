@@ -405,7 +405,7 @@ static struct btrfs_fs_devices *alloc_fs_devices(const u8 *fsid,
 void btrfs_free_device(struct btrfs_device *device)
 {
 	WARN_ON(!list_empty(&device->post_commit_list));
-	rcu_string_free(device->name);
+	kfree(device->name);
 	extent_io_tree_release(&device->alloc_state);
 	btrfs_destroy_dev_zone_info(device);
 	kfree(device);
@@ -613,7 +613,7 @@ static int btrfs_open_one_device(struct btrfs_fs_devices *fs_devices,
 	if (!device->name)
 		return -EINVAL;
 
-	ret = btrfs_get_bdev_and_sb(device->name->str, flags, holder, 1,
+	ret = btrfs_get_bdev_and_sb(device->name, flags, holder, 1,
 				    &bdev, &disk_super);
 	if (ret)
 		return ret;
@@ -880,7 +880,7 @@ static noinline struct btrfs_device *device_list_add(const char *path,
 				disk_super->fsid, devid, found_transid, path,
 				current->comm, task_pid_nr(current));
 
-	} else if (!device->name || strcmp(device->name->str, path)) {
+	} else if (!device->name || strcmp(device->name, path)) {
 		/*
 		 * When FS is already mounted.
 		 * 1. If you are here and if the device->name is NULL that
@@ -940,7 +940,7 @@ static noinline struct btrfs_device *device_list_add(const char *path,
 			}
 			btrfs_info_in_rcu(NULL,
 	"devid %llu device path %s changed to %s scanned by %s (%d)",
-					  devid, rcu_str_deref(device->name),
+					  devid, device->name,
 					  path, current->comm,
 					  task_pid_nr(current));
 		}
@@ -950,7 +950,7 @@ static noinline struct btrfs_device *device_list_add(const char *path,
 			mutex_unlock(&fs_devices->device_list_mutex);
 			return ERR_PTR(-ENOMEM);
 		}
-		rcu_string_free(device->name);
+		kfree(device->name);
 		set_device_name(device, name);
 		if (test_bit(BTRFS_DEV_STATE_MISSING, &device->dev_state)) {
 			fs_devices->missing_devices--;
@@ -1007,7 +1007,7 @@ static struct btrfs_fs_devices *clone_fs_devices(struct btrfs_fs_devices *orig)
 		 * uuid mutex so nothing we touch in here is going to disappear.
 		 */
 		if (orig_dev->name) {
-			name = rcu_string_strdup(orig_dev->name->str,
+			name = rcu_string_strdup(orig_dev->name,
 					GFP_KERNEL);
 			if (!name) {
 				btrfs_free_device(device);
@@ -2095,7 +2095,7 @@ int btrfs_rm_device(struct btrfs_fs_info *fs_info,
 	if (btrfs_pinned_by_swapfile(fs_info, device)) {
 		btrfs_warn_in_rcu(fs_info,
 		  "cannot remove device %s (devid %llu) due to active swapfile",
-				  rcu_str_deref(device->name), device->devid);
+				  device->name, device->devid);
 		return -ETXTBSY;
 	}
 
@@ -2189,7 +2189,7 @@ int btrfs_rm_device(struct btrfs_fs_info *fs_info,
 	 */
 	if (test_bit(BTRFS_DEV_STATE_WRITEABLE, &device->dev_state)) {
 		btrfs_scratch_superblocks(fs_info, device->bdev,
-					  device->name->str);
+					  device->name);
 		if (device->bdev) {
 			sync_blockdev(device->bdev);
 			invalidate_bdev(device->bdev);
@@ -2304,7 +2304,7 @@ void btrfs_destroy_dev_replace_tgtdev(struct btrfs_device *tgtdev)
 	mutex_unlock(&fs_devices->device_list_mutex);
 
 	btrfs_scratch_superblocks(tgtdev->fs_info, tgtdev->bdev,
-				  tgtdev->name->str);
+				  tgtdev->name);
 
 	btrfs_close_bdev(tgtdev);
 	synchronize_rcu();
@@ -6830,7 +6830,7 @@ static void btrfs_submit_dev_bio(struct btrfs_device *dev, struct bio *bio)
 	btrfs_debug_in_rcu(dev->fs_info,
 	"%s: rw %d 0x%x, sector=%llu, dev=%lu (%s id %llu), size=%u",
 		__func__, bio_op(bio), bio->bi_opf, bio->bi_iter.bi_sector,
-		(unsigned long)dev->bdev->bd_dev, rcu_str_deref(dev->name),
+		(unsigned long)dev->bdev->bd_dev, dev->name,
 		dev->devid, bio->bi_iter.bi_size);
 
 	btrfsic_check_bio(bio);
@@ -7881,7 +7881,7 @@ static int update_dev_stat_item(struct btrfs_trans_handle *trans,
 	if (ret < 0) {
 		btrfs_warn_in_rcu(fs_info,
 			"error %d while searching for dev_stats item for device %s",
-			      ret, rcu_str_deref(device->name));
+			      ret, device->name);
 		goto out;
 	}
 
@@ -7892,7 +7892,7 @@ static int update_dev_stat_item(struct btrfs_trans_handle *trans,
 		if (ret != 0) {
 			btrfs_warn_in_rcu(fs_info,
 				"delete too small dev_stats item for device %s failed %d",
-				      rcu_str_deref(device->name), ret);
+				      device->name, ret);
 			goto out;
 		}
 		ret = 1;
@@ -7906,7 +7906,7 @@ static int update_dev_stat_item(struct btrfs_trans_handle *trans,
 		if (ret < 0) {
 			btrfs_warn_in_rcu(fs_info,
 				"insert dev_stats item for device %s failed %d",
-				rcu_str_deref(device->name), ret);
+				device->name, ret);
 			goto out;
 		}
 	}
@@ -7971,7 +7971,7 @@ void btrfs_dev_stat_inc_and_print(struct btrfs_device *dev, int index)
 		return;
 	btrfs_err_rl_in_rcu(dev->fs_info,
 		"bdev %s errs: wr %u, rd %u, flush %u, corrupt %u, gen %u",
-			   rcu_str_deref(dev->name),
+			   dev->name,
 			   btrfs_dev_stat_read(dev, BTRFS_DEV_STAT_WRITE_ERRS),
 			   btrfs_dev_stat_read(dev, BTRFS_DEV_STAT_READ_ERRS),
 			   btrfs_dev_stat_read(dev, BTRFS_DEV_STAT_FLUSH_ERRS),
@@ -7991,7 +7991,7 @@ static void btrfs_dev_stat_print_on_load(struct btrfs_device *dev)
 
 	btrfs_info_in_rcu(dev->fs_info,
 		"bdev %s errs: wr %u, rd %u, flush %u, corrupt %u, gen %u",
-	       rcu_str_deref(dev->name),
+	       dev->name,
 	       btrfs_dev_stat_read(dev, BTRFS_DEV_STAT_WRITE_ERRS),
 	       btrfs_dev_stat_read(dev, BTRFS_DEV_STAT_READ_ERRS),
 	       btrfs_dev_stat_read(dev, BTRFS_DEV_STAT_FLUSH_ERRS),
@@ -8428,6 +8428,7 @@ void __cold btrfs_bioset_exit(void)
 void set_device_name(struct btrfs_device *device, struct rcu_string *name)
 {
 	spin_lock(&device_name_lock);
-	rcu_assign_pointer(device->name, name);
+	/* Yoink the rcu_string internal value */
+	device->name = name->str;
 	spin_unlock(&device_name_lock);
 }

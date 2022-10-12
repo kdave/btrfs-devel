@@ -262,7 +262,7 @@ static int btrfs_get_dev_zones(struct btrfs_device *device, u64 pos,
 	if (ret < 0) {
 		btrfs_err_in_rcu(device->fs_info,
 				 "zoned: failed to read zone %llu on %s (devid %llu)",
-				 pos, rcu_str_deref(device->name),
+				 pos, device->name,
 				 device->devid);
 		return ret;
 	}
@@ -399,14 +399,14 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 	if (zone_info->zone_size > BTRFS_MAX_ZONE_SIZE) {
 		btrfs_err_in_rcu(fs_info,
 		"zoned: %s: zone size %llu larger than supported maximum %llu",
-				 rcu_str_deref(device->name),
+				 device->name,
 				 zone_info->zone_size, BTRFS_MAX_ZONE_SIZE);
 		ret = -EINVAL;
 		goto out;
 	} else if (zone_info->zone_size < BTRFS_MIN_ZONE_SIZE) {
 		btrfs_err_in_rcu(fs_info,
 		"zoned: %s: zone size %llu smaller than supported minimum %u",
-				 rcu_str_deref(device->name),
+				 device->name,
 				 zone_info->zone_size, BTRFS_MIN_ZONE_SIZE);
 		ret = -EINVAL;
 		goto out;
@@ -441,7 +441,7 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 	if (max_active_zones && max_active_zones < BTRFS_MIN_ACTIVE_ZONES) {
 		btrfs_err_in_rcu(fs_info,
 "zoned: %s: max active zones %u is too small, need at least %u active zones",
-				 rcu_str_deref(device->name), max_active_zones,
+				 device->name, max_active_zones,
 				 BTRFS_MIN_ACTIVE_ZONES);
 		ret = -EINVAL;
 		goto out;
@@ -483,7 +483,7 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 		if (!zone_info->zone_cache) {
 			btrfs_err_in_rcu(device->fs_info,
 				"zoned: failed to allocate zone cache for %s",
-				rcu_str_deref(device->name));
+				device->name);
 			ret = -ENOMEM;
 			goto out;
 		}
@@ -520,7 +520,7 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 	if (nreported != zone_info->nr_zones) {
 		btrfs_err_in_rcu(device->fs_info,
 				 "inconsistent number of zones on %s (%u/%u)",
-				 rcu_str_deref(device->name), nreported,
+				 device->name, nreported,
 				 zone_info->nr_zones);
 		ret = -EIO;
 		goto out;
@@ -530,7 +530,7 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 		if (nactive > max_active_zones) {
 			btrfs_err_in_rcu(device->fs_info,
 			"zoned: %u active zones on %s exceeds max_active_zones %u",
-					 nactive, rcu_str_deref(device->name),
+					 nactive, device->name,
 					 max_active_zones);
 			ret = -EIO;
 			goto out;
@@ -604,14 +604,14 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 		/* Just in case */
 		btrfs_err_in_rcu(fs_info, "zoned: unsupported model %d on %s",
 				 bdev_zoned_model(bdev),
-				 rcu_str_deref(device->name));
+				 device->name);
 		ret = -EOPNOTSUPP;
 		goto out_free_zone_info;
 	}
 
 	btrfs_info_in_rcu(fs_info,
 		"%s block device %s, %u %szones of %llu bytes",
-		model, rcu_str_deref(device->name), zone_info->nr_zones,
+		model, device->name, zone_info->nr_zones,
 		emulated, zone_info->zone_size);
 
 	return 0;
@@ -1140,7 +1140,7 @@ int btrfs_ensure_empty_zones(struct btrfs_device *device, u64 start, u64 size)
 		btrfs_warn_in_rcu(
 			device->fs_info,
 		"zoned: resetting device %s (devid %llu) zone %llu for allocation",
-			rcu_str_deref(device->name), device->devid, pos >> shift);
+			device->name, device->devid, pos >> shift);
 		WARN_ON_ONCE(1);
 
 		ret = btrfs_reset_device_zone(device, pos, zinfo->zone_size,
@@ -1363,7 +1363,7 @@ int btrfs_load_block_group_zone_info(struct btrfs_block_group *cache, bool new)
 			btrfs_err_in_rcu(fs_info,
 	"zoned: unexpected conventional zone %llu on device %s (devid %llu)",
 				zone.start << SECTOR_SHIFT,
-				rcu_str_deref(device->name), device->devid);
+				device->name, device->devid);
 			ret = -EIO;
 			goto out;
 		}
@@ -1376,7 +1376,7 @@ int btrfs_load_block_group_zone_info(struct btrfs_block_group *cache, bool new)
 			btrfs_err(fs_info,
 		"zoned: offline/readonly zone %llu on device %s (devid %llu)",
 				  physical[i] >> device->zone_info->zone_size_shift,
-				  rcu_str_deref(device->name), device->devid);
+				  device->name, device->devid);
 			alloc_offsets[i] = WP_MISSING_DEV;
 			break;
 		case BLK_ZONE_COND_EMPTY:

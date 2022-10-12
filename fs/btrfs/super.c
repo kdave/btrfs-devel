@@ -2629,7 +2629,7 @@ static int btrfs_show_devname(struct seq_file *m, struct dentry *root)
 	 * the end of RCU grace period.
 	 */
 	rcu_read_lock();
-	seq_escape(m, rcu_str_deref(fs_info->fs_devices->latest_dev->name), " \t\n\\");
+	seq_escape(m, fs_info->fs_devices->latest_dev->name, " \t\n\\");
 	rcu_read_unlock();
 
 	return 0;

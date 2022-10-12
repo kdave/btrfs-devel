@@ -755,7 +755,7 @@ static int btrfsic_process_superblock_dev_mirror(
 			btrfs_info_in_rcu(fs_info,
 			"new initial S-block (bdev %p, %s) @%llu (%pg/%llu/%d)",
 				     superblock_bdev,
-				     rcu_str_deref(device->name), dev_bytenr,
+				     device->name, dev_bytenr,
 				     dev_state->bdev, dev_bytenr,
 				     superblock_mirror_num);
 		list_add(&superblock_tmp->all_blocks_node,

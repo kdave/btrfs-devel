@@ -9,6 +9,7 @@
 #include <linux/bio.h>
 #include <linux/sort.h>
 #include <linux/btrfs.h>
+#include "rcu-string.h"
 #include "async-thread.h"
 
 #define BTRFS_MAX_DATA_CHUNK_SIZE	(10ULL * SZ_1G)
@@ -96,7 +97,7 @@ struct btrfs_device {
 	struct btrfs_fs_devices *fs_devices;
 	struct btrfs_fs_info *fs_info;
 
-	struct rcu_string __rcu *name;
+	char *name;
 
 	u64 generation;
 
