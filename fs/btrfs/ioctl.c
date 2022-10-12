@@ -38,7 +38,6 @@
 #include "volumes.h"
 #include "locking.h"
 #include "backref.h"
-#include "rcu-string.h"
 #include "send.h"
 #include "dev-replace.h"
 #include "props.h"

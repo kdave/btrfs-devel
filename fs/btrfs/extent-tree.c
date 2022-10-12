@@ -33,7 +33,6 @@
 #include "delalloc-space.h"
 #include "block-group.h"
 #include "discard.h"
-#include "rcu-string.h"
 #include "zoned.h"
 #include "dev-replace.h"
 
