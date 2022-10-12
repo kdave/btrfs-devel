@@ -14,6 +14,7 @@
 #define BTRFS_MAX_DATA_CHUNK_SIZE	(10ULL * SZ_1G)
 
 extern struct mutex uuid_mutex;
+extern spinlock_t device_name_lock;
 
 #define BTRFS_STRIPE_LEN	SZ_64K
 

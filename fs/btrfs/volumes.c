@@ -362,6 +362,12 @@ struct list_head * __attribute_const__ btrfs_get_fs_uuids(void)
 }
 
 /*
+ * Global lock to protect changing name pointer of device structure and printing
+ * in show_dev_name.
+ */
+DEFINE_SPINLOCK(device_name_lock);
+
+/*
  * alloc_fs_devices - allocate struct btrfs_fs_devices
  * @fsid:		if not NULL, copy the UUID to fs_devices::fsid
  * @metadata_fsid:	if not NULL, copy the UUID to fs_devices::metadata_fsid
@@ -8421,5 +8427,7 @@ void __cold btrfs_bioset_exit(void)
 
 void set_device_name(struct btrfs_device *device, struct rcu_string *name)
 {
+	spin_lock(&device_name_lock);
 	rcu_assign_pointer(device->name, name);
+	spin_unlock(&device_name_lock);
 }
