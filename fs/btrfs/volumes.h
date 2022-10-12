@@ -760,6 +760,6 @@ bool btrfs_repair_one_zone(struct btrfs_fs_info *fs_info, u64 logical);
 
 bool btrfs_pinned_by_swapfile(struct btrfs_fs_info *fs_info, void *ptr);
 
-void set_device_name(struct btrfs_device *device, struct rcu_string *name);
+void set_device_name(struct btrfs_device *device, char *name);
 
 #endif

@@ -767,7 +767,7 @@ static noinline struct btrfs_device *device_list_add(const char *path,
 {
 	struct btrfs_device *device;
 	struct btrfs_fs_devices *fs_devices = NULL;
-	struct rcu_string *name;
+	char *name;
 	u64 found_transid = btrfs_super_generation(disk_super);
 	u64 devid = btrfs_stack_device_id(&disk_super->dev_item);
 	dev_t path_devt;
@@ -856,7 +856,7 @@ static noinline struct btrfs_device *device_list_add(const char *path,
 			return device;
 		}
 
-		name = rcu_string_strdup(path, GFP_NOFS);
+		name = kstrdup(path, GFP_NOFS);
 		if (!name) {
 			btrfs_free_device(device);
 			mutex_unlock(&fs_devices->device_list_mutex);
@@ -947,7 +947,7 @@ static noinline struct btrfs_device *device_list_add(const char *path,
 					  task_pid_nr(current));
 		}
 
-		name = rcu_string_strdup(path, GFP_NOFS);
+		name = kstrdup(path, GFP_NOFS);
 		if (!name) {
 			mutex_unlock(&fs_devices->device_list_mutex);
 			return ERR_PTR(-ENOMEM);
@@ -997,7 +997,7 @@ static struct btrfs_fs_devices *clone_fs_devices(struct btrfs_fs_devices *orig)
 	fs_devices->total_devices = orig->total_devices;
 
 	list_for_each_entry(orig_dev, &orig->devices, dev_list) {
-		struct rcu_string *name;
+		char *name;
 
 		device = btrfs_alloc_device(NULL, &orig_dev->devid,
 					    orig_dev->uuid);
@@ -1011,8 +1011,7 @@ static struct btrfs_fs_devices *clone_fs_devices(struct btrfs_fs_devices *orig)
 		 * uuid mutex so nothing we touch in here is going to disappear.
 		 */
 		if (orig_dev->name) {
-			name = rcu_string_strdup(orig_dev->name,
-					GFP_KERNEL);
+			name = kstrdup(orig_dev->name, GFP_KERNEL);
 			if (!name) {
 				btrfs_free_device(device);
 				ret = -ENOMEM;
@@ -2591,7 +2590,7 @@ int btrfs_init_new_device(struct btrfs_fs_info *fs_info, const char *device_path
 	struct btrfs_device *device;
 	struct block_device *bdev;
 	struct super_block *sb = fs_info->sb;
-	struct rcu_string *name;
+	char *name;
 	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices;
 	struct btrfs_fs_devices *seed_devices;
 	u64 orig_super_total_bytes;
@@ -2639,7 +2638,7 @@ int btrfs_init_new_device(struct btrfs_fs_info *fs_info, const char *device_path
 		goto error;
 	}
 
-	name = rcu_string_strdup(device_path, GFP_KERNEL);
+	name = kstrdup(device_path, GFP_KERNEL);
 	if (!name) {
 		ret = -ENOMEM;
 		goto error_free_device;
@@ -8429,13 +8428,12 @@ void __cold btrfs_bioset_exit(void)
 	bioset_exit(&btrfs_bioset);
 }
 
-void set_device_name(struct btrfs_device *device, struct rcu_string *name)
+void set_device_name(struct btrfs_device *device, char *name)
 {
 	spin_lock(&device_name_lock);
-	/* Yoink the rcu_string internal value */
 	printk(KERN_ERR "DBG: old name 0x%lx, new name 0x%lx\n",
 			(unsigned long)device->name,
-			(unsigned long)name->str);
-	device->name = name->str;
+			(unsigned long)name);
+	device->name = name;
 	spin_unlock(&device_name_lock);
 }
