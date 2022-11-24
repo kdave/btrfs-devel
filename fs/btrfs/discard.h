@@ -14,6 +14,14 @@ struct btrfs_block_group;
 #define BTRFS_ASYNC_DISCARD_MAX_FILTER			(SZ_1M)
 #define BTRFS_ASYNC_DISCARD_MIN_FILTER			(SZ_32K)
 
+/*
+ * Type of operation that will be used to clear unused blocks.
+ */
+enum btrfs_clear_op_type {
+	BTRFS_CLEAR_OP_DISCARD,
+	BTRFS_NR_CLEAR_OP_TYPES,
+};
+
 /* List operations */
 void btrfs_discard_check_filter(struct btrfs_block_group *block_group, u64 bytes);
 

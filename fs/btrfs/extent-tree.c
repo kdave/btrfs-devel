@@ -1205,7 +1205,8 @@ static int remove_extent_backref(struct btrfs_trans_handle *trans,
 }
 
 static int btrfs_issue_discard(struct block_device *bdev, u64 start, u64 len,
-			       u64 *discarded_bytes)
+			       u64 *discarded_bytes,
+			       enum btrfs_clear_op_type clear)
 {
 	int j, ret = 0;
 	u64 bytes_left, end;
@@ -1251,8 +1252,11 @@ static int btrfs_issue_discard(struct block_device *bdev, u64 start, u64 len,
 		}
 
 		if (size) {
-			ret = blkdev_issue_discard(bdev, start >> 9, size >> 9,
-						   GFP_NOFS);
+			if (clear == BTRFS_CLEAR_OP_DISCARD)
+				ret = blkdev_issue_discard(bdev, start >> 9,
+							   size >> 9, GFP_NOFS);
+			else
+				ret = -EOPNOTSUPP;
 			if (!ret)
 				*discarded_bytes += size;
 			else if (ret != -EOPNOTSUPP)
@@ -1268,15 +1272,19 @@ static int btrfs_issue_discard(struct block_device *bdev, u64 start, u64 len,
 	}
 
 	if (bytes_left) {
-		ret = blkdev_issue_discard(bdev, start >> 9, bytes_left >> 9,
-					   GFP_NOFS);
+		if (clear == BTRFS_CLEAR_OP_DISCARD)
+			ret = blkdev_issue_discard(bdev, start >> 9,
+						   bytes_left >> 9, GFP_NOFS);
+		else
+			ret = -EOPNOTSUPP;
 		if (!ret)
 			*discarded_bytes += bytes_left;
 	}
 	return ret;
 }
 
-static int do_discard_extent(struct btrfs_discard_stripe *stripe, u64 *bytes)
+static int do_discard_extent(struct btrfs_discard_stripe *stripe, u64 *bytes,
+			     enum btrfs_clear_op_type clear)
 {
 	struct btrfs_device *dev = stripe->dev;
 	struct btrfs_fs_info *fs_info = dev->fs_info;
@@ -1305,7 +1313,7 @@ static int do_discard_extent(struct btrfs_discard_stripe *stripe, u64 *bytes)
 					      &discarded);
 		discarded += src_disc;
 	} else if (bdev_max_discard_sectors(stripe->dev->bdev)) {
-		ret = btrfs_issue_discard(dev->bdev, phys, len, &discarded);
+		ret = btrfs_issue_discard(dev->bdev, phys, len, &discarded, clear);
 	} else {
 		ret = 0;
 		*bytes = 0;
@@ -1317,7 +1325,8 @@ out:
 }
 
 int btrfs_discard_extent(struct btrfs_fs_info *fs_info, u64 bytenr,
-			 u64 num_bytes, u64 *actual_bytes)
+			 u64 num_bytes, u64 *actual_bytes,
+			 enum btrfs_clear_op_type clear)
 {
 	int ret = 0;
 	u64 discarded_bytes = 0;
@@ -1356,7 +1365,7 @@ int btrfs_discard_extent(struct btrfs_fs_info *fs_info, u64 bytenr,
 					&stripe->dev->dev_state))
 				continue;
 
-			ret = do_discard_extent(stripe, &bytes);
+			ret = do_discard_extent(stripe, &bytes, clear);
 			if (ret) {
 				/*
 				 * Keep going if discard is not supported by the
@@ -2785,7 +2794,8 @@ int btrfs_finish_extent_commit(struct btrfs_trans_handle *trans)
 
 		if (btrfs_test_opt(fs_info, DISCARD_SYNC))
 			ret = btrfs_discard_extent(fs_info, start,
-						   end + 1 - start, NULL);
+						   end + 1 - start, NULL,
+						   BTRFS_CLEAR_OP_DISCARD);
 
 		clear_extent_dirty(unpin, start, end, &cached_state);
 		unpin_extent_range(fs_info, start, end, true);
@@ -2813,7 +2823,8 @@ int btrfs_finish_extent_commit(struct btrfs_trans_handle *trans)
 			ret = btrfs_discard_extent(fs_info,
 						   block_group->start,
 						   block_group->length,
-						   &trimmed);
+						   &trimmed,
+						   BTRFS_CLEAR_OP_DISCARD);
 
 		list_del_init(&block_group->bg_list);
 		btrfs_unfreeze_block_group(block_group);
@@ -6010,7 +6021,8 @@ int btrfs_error_unpin_extent_range(struct btrfs_fs_info *fs_info,
  * it while performing the free space search since we have already
  * held back allocations.
  */
-static int btrfs_trim_free_extents(struct btrfs_device *device, u64 *trimmed)
+static int btrfs_trim_free_extents(struct btrfs_device *device, u64 *trimmed,
+				   enum btrfs_clear_op_type clear)
 {
 	u64 start = BTRFS_DEVICE_RANGE_RESERVED, len = 0, end = 0;
 	int ret;
@@ -6076,7 +6088,7 @@ static int btrfs_trim_free_extents(struct btrfs_device *device, u64 *trimmed)
 		}
 
 		ret = btrfs_issue_discard(device->bdev, start, len,
-					  &bytes);
+					  &bytes, clear);
 		if (!ret)
 			set_extent_bits(&device->alloc_state, start,
 					start + bytes - 1,
@@ -6159,7 +6171,8 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
 						     &group_trimmed,
 						     start,
 						     end,
-						     range->minlen);
+						     range->minlen,
+						     BTRFS_CLEAR_OP_DISCARD);
 
 			trimmed += group_trimmed;
 			if (ret) {
@@ -6180,7 +6193,8 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
 		if (test_bit(BTRFS_DEV_STATE_MISSING, &device->dev_state))
 			continue;
 
-		ret = btrfs_trim_free_extents(device, &group_trimmed);
+		ret = btrfs_trim_free_extents(device, &group_trimmed,
+					      BTRFS_CLEAR_OP_DISCARD);
 		if (ret) {
 			dev_failed++;
 			dev_ret = ret;
