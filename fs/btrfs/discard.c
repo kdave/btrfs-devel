@@ -524,13 +524,13 @@ static void btrfs_discard_workfn(struct work_struct *work)
 		btrfs_trim_block_group_bitmaps(block_group, &trimmed,
 				       block_group->discard_cursor,
 				       btrfs_block_group_end(block_group),
-				       minlen, maxlen, true);
+				       minlen, maxlen, true, BTRFS_CLEAR_OP_DISCARD);
 		discard_ctl->discard_bitmap_bytes += trimmed;
 	} else {
 		btrfs_trim_block_group_extents(block_group, &trimmed,
 				       block_group->discard_cursor,
 				       btrfs_block_group_end(block_group),
-				       minlen, true);
+				       minlen, true, BTRFS_CLEAR_OP_DISCARD);
 		discard_ctl->discard_extent_bytes += trimmed;
 	}
 
