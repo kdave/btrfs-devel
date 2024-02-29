@@ -2507,7 +2507,8 @@ next:
 struct btrfs_fiemap_entry {
 	u64 offset;
 	u64 phys;
-	u64 len;
+	u64 log_len;
+	u64 phys_len;
 	u32 flags;
 };
 
@@ -2565,7 +2566,8 @@ struct fiemap_cache {
 	/* Fields for the cached extent (unsubmitted, not ready, extent). */
 	u64 offset;
 	u64 phys;
-	u64 len;
+	u64 log_len;
+	u64 phys_len;
 	u32 flags;
 	bool cached;
 };
@@ -2578,8 +2580,8 @@ static int flush_fiemap_cache(struct fiemap_extent_info *fieinfo,
 		int ret;
 
 		ret = fiemap_fill_next_extent(fieinfo, entry->offset,
-					      entry->phys, entry->len,
-					      entry->flags);
+					      entry->phys, entry->log_len,
+					      entry->phys_len, entry->flags);
 		/*
 		 * Ignore 1 (reached max entries) because we keep track of that
 		 * ourselves in emit_fiemap_extent().
@@ -2604,7 +2606,8 @@ static int flush_fiemap_cache(struct fiemap_extent_info *fieinfo,
  */
 static int emit_fiemap_extent(struct fiemap_extent_info *fieinfo,
 				struct fiemap_cache *cache,
-				u64 offset, u64 phys, u64 len, u32 flags)
+				u64 offset, u64 phys, u64 log_len,
+				u64 phys_len, u32 flags)
 {
 	struct btrfs_fiemap_entry *entry;
 	u64 cache_end;
@@ -2647,7 +2650,7 @@ static int emit_fiemap_extent(struct fiemap_extent_info *fieinfo,
 	 * or equals to what we have in cache->offset. We deal with this as
 	 * described below.
 	 */
-	cache_end = cache->offset + cache->len;
+	cache_end = cache->offset + cache->log_len;
 	if (cache_end > offset) {
 		if (offset == cache->offset) {
 			/*
@@ -2671,10 +2674,10 @@ static int emit_fiemap_extent(struct fiemap_extent_info *fieinfo,
 			 * where a previously found file extent item was split
 			 * due to an ordered extent completing.
 			 */
-			cache->len = offset - cache->offset;
+			cache->log_len = offset - cache->offset;
 			goto emit;
 		} else {
-			const u64 range_end = offset + len;
+			const u64 range_end = offset + log_len;
 
 			/*
 			 * The offset of the file extent item we have just found
@@ -2711,7 +2714,7 @@ static int emit_fiemap_extent(struct fiemap_extent_info *fieinfo,
 				phys += cache_end - offset;
 
 			offset = cache_end;
-			len = range_end - cache_end;
+			log_len = range_end - cache_end;
 			goto emit;
 		}
 	}
@@ -2721,15 +2724,17 @@ static int emit_fiemap_extent(struct fiemap_extent_info *fieinfo,
 	 * 1) Their logical addresses are continuous
 	 *
 	 * 2) Their physical addresses are continuous
-	 *    So truly compressed (physical size smaller than logical size)
-	 *    extents won't get merged with each other
 	 *
 	 * 3) Share same flags
+	 *
+	 * 4) Not compressed
 	 */
-	if (cache->offset + cache->len  == offset &&
-	    cache->phys + cache->len == phys  &&
-	    cache->flags == flags) {
-		cache->len += len;
+	if (cache->offset + cache->log_len  == offset &&
+	    cache->phys + cache->log_len == phys  &&
+	    cache->flags == flags &&
+	    !(flags & FIEMAP_EXTENT_ENCODED)) {
+		cache->log_len += log_len;
+		cache->phys_len += phys_len;
 		return 0;
 	}
 
@@ -2746,7 +2751,7 @@ emit:
 		 * to miss it.
 		 */
 		entry = &cache->entries[cache->entries_size - 1];
-		cache->next_search_offset = entry->offset + entry->len;
+		cache->next_search_offset = entry->offset + entry->log_len;
 		cache->cached = false;
 
 		return BTRFS_FIEMAP_FLUSH_CACHE;
@@ -2755,7 +2760,8 @@ emit:
 	entry = &cache->entries[cache->entries_pos];
 	entry->offset = cache->offset;
 	entry->phys = cache->phys;
-	entry->len = cache->len;
+	entry->log_len = cache->log_len;
+	entry->phys_len = cache->phys_len;
 	entry->flags = cache->flags;
 	cache->entries_pos++;
 	cache->extents_mapped++;
@@ -2768,7 +2774,8 @@ assign:
 	cache->cached = true;
 	cache->offset = offset;
 	cache->phys = phys;
-	cache->len = len;
+	cache->log_len = log_len;
+	cache->phys_len = phys_len;
 	cache->flags = flags;
 
 	return 0;
@@ -2794,7 +2801,8 @@ static int emit_last_fiemap_cache(struct fiemap_extent_info *fieinfo,
 		return 0;
 
 	ret = fiemap_fill_next_extent(fieinfo, cache->offset, cache->phys,
-				      cache->len, cache->len, cache->flags);
+				      cache->log_len, cache->phys_len,
+				      cache->flags);
 	cache->cached = false;
 	if (ret > 0)
 		ret = 0;
@@ -2988,13 +2996,15 @@ static int fiemap_process_hole(struct btrfs_inode *inode,
 			}
 			ret = emit_fiemap_extent(fieinfo, cache, prealloc_start,
 						 disk_bytenr + extent_offset,
-						 prealloc_len, prealloc_flags);
+						 prealloc_len, prealloc_len,
+						 prealloc_flags);
 			if (ret)
 				return ret;
 			extent_offset += prealloc_len;
 		}
 
 		ret = emit_fiemap_extent(fieinfo, cache, delalloc_start, 0,
+					 delalloc_end + 1 - delalloc_start,
 					 delalloc_end + 1 - delalloc_start,
 					 FIEMAP_EXTENT_DELALLOC |
 					 FIEMAP_EXTENT_UNKNOWN);
@@ -3035,7 +3045,8 @@ static int fiemap_process_hole(struct btrfs_inode *inode,
 		}
 		ret = emit_fiemap_extent(fieinfo, cache, prealloc_start,
 					 disk_bytenr + extent_offset,
-					 prealloc_len, prealloc_flags);
+					 prealloc_len, prealloc_len,
+					 prealloc_flags);
 		if (ret)
 			return ret;
 	}
@@ -3181,6 +3192,7 @@ restart:
 		u64 extent_offset = 0;
 		u64 extent_gen;
 		u64 disk_bytenr = 0;
+		u64 disk_size = 0;
 		u64 flags = 0;
 		int extent_type;
 		u8 compression;
@@ -3232,8 +3244,9 @@ restart:
 
 		if (extent_type != BTRFS_FILE_EXTENT_INLINE) {
 			disk_bytenr = btrfs_file_extent_disk_bytenr(leaf, ei);
-			if (compression == BTRFS_COMPRESS_NONE)
+			if (compression == BTRFS_COMPRESS_NONE) {
 				extent_offset = btrfs_file_extent_offset(leaf, ei);
+			}
 		}
 
 		if (compression != BTRFS_COMPRESS_NONE)
@@ -3243,7 +3256,7 @@ restart:
 			flags |= FIEMAP_EXTENT_DATA_INLINE;
 			flags |= FIEMAP_EXTENT_NOT_ALIGNED;
 			ret = emit_fiemap_extent(fieinfo, &cache, key.offset, 0,
-						 extent_len, flags);
+						 extent_len, extent_len, flags);
 		} else if (extent_type == BTRFS_FILE_EXTENT_PREALLOC) {
 			ret = fiemap_process_hole(inode, fieinfo, &cache,
 						  &delalloc_cached_state,
@@ -3258,6 +3271,7 @@ restart:
 						  backref_ctx, 0, 0, 0,
 						  key.offset, extent_end - 1);
 		} else {
+			disk_size = btrfs_file_extent_disk_num_bytes(leaf, ei);
 			/* We have a regular extent. */
 			if (fieinfo->fi_extents_max) {
 				ret = btrfs_is_data_extent_shared(inode,
@@ -3272,7 +3286,9 @@ restart:
 
 			ret = emit_fiemap_extent(fieinfo, &cache, key.offset,
 						 disk_bytenr + extent_offset,
-						 extent_len, flags);
+						 extent_len,
+						 disk_size - extent_offset,
+						 flags);
 		}
 
 		if (ret < 0) {
@@ -3310,7 +3326,7 @@ check_eof_delalloc:
 		prev_extent_end = range_end;
 	}
 
-	if (cache.cached && cache.offset + cache.len >= last_extent_end) {
+	if (cache.cached && cache.offset + cache.log_len >= last_extent_end) {
 		const u64 i_size = i_size_read(&inode->vfs_inode);
 
 		if (prev_extent_end < i_size) {
