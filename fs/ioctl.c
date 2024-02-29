@@ -139,6 +139,7 @@ int fiemap_fill_next_extent(struct fiemap_extent_info *fieinfo, u64 logical,
 	extent.fe_logical = logical;
 	extent.fe_physical = phys;
 	extent.fe_length = len;
+	extent.fe_physical_length = len;
 	extent.fe_flags = flags;
 
 	dest += fieinfo->fi_extents_mapped;
