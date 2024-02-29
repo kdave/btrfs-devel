@@ -16,6 +16,6 @@ struct fiemap_extent_info {
 int fiemap_prep(struct inode *inode, struct fiemap_extent_info *fieinfo,
 		u64 start, u64 *len, u32 supported_flags);
 int fiemap_fill_next_extent(struct fiemap_extent_info *info, u64 logical,
-			    u64 phys, u64 len, u32 flags);
+			    u64 phys, u64 log_len, u64 phys_len, u32 flags);
 
 #endif /* _LINUX_FIEMAP_H 1 */

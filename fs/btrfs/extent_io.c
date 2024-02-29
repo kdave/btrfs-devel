@@ -2794,7 +2794,7 @@ static int emit_last_fiemap_cache(struct fiemap_extent_info *fieinfo,
 		return 0;
 
 	ret = fiemap_fill_next_extent(fieinfo, cache->offset, cache->phys,
-				      cache->len, cache->flags);
+				      cache->len, cache->len, cache->flags);
 	cache->cached = false;
 	if (ret > 0)
 		ret = 0;

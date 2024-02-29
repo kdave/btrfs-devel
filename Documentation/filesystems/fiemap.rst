@@ -234,7 +234,8 @@ For each extent in the request range, the file system should call
 the helper function, fiemap_fill_next_extent()::
 
   int fiemap_fill_next_extent(struct fiemap_extent_info *info, u64 logical,
-			      u64 phys, u64 len, u32 flags, u32 dev);
+			      u64 phys, u64 log_len, u64 phys_len, u32 flags,
+                              u32 dev);
 
 fiemap_fill_next_extent() will use the passed values to populate the
 next free extent in the fm_extents array. 'General' extent flags will

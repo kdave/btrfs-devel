@@ -36,7 +36,7 @@ static int iomap_to_fiemap(struct fiemap_extent_info *fi,
 
 	return fiemap_fill_next_extent(fi, iomap->offset,
 			iomap->addr != IOMAP_NULL_ADDR ? iomap->addr : 0,
-			iomap->length, flags);
+			iomap->length, iomap->length, flags);
 }
 
 static loff_t iomap_fiemap_iter(const struct iomap_iter *iter,

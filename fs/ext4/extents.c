@@ -2215,6 +2215,7 @@ static int ext4_fill_es_cache_info(struct inode *inode,
 				(__u64)es.es_lblk << blksize_bits,
 				(__u64)es.es_pblk << blksize_bits,
 				(__u64)es.es_len << blksize_bits,
+				(__u64)es.es_len << blksize_bits,
 				flags);
 		if (next == 0)
 			break;

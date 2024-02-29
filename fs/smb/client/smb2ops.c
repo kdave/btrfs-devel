@@ -3880,6 +3880,7 @@ static int smb3_fiemap(struct cifs_tcon *tcon,
 				le64_to_cpu(out_data[i].file_offset),
 				le64_to_cpu(out_data[i].file_offset),
 				le64_to_cpu(out_data[i].length),
+				le64_to_cpu(out_data[i].length),
 				flags);
 		if (rc < 0)
 			goto out;

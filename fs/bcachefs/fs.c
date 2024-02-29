@@ -859,7 +859,9 @@ static int bch2_fill_extent(struct bch_fs *c,
 			ret = fiemap_fill_next_extent(info,
 						bkey_start_offset(k.k) << 9,
 						offset << 9,
-						k.k->size << 9, flags|flags2);
+						k.k->size << 9,
+						k.k->size << 9,
+						flags|flags2);
 			if (ret)
 				return ret;
 		}
@@ -869,12 +871,14 @@ static int bch2_fill_extent(struct bch_fs *c,
 		return fiemap_fill_next_extent(info,
 					       bkey_start_offset(k.k) << 9,
 					       0, k.k->size << 9,
+					       k.k->size << 9,
 					       flags|
 					       FIEMAP_EXTENT_DATA_INLINE);
 	} else if (k.k->type == KEY_TYPE_reservation) {
 		return fiemap_fill_next_extent(info,
 					       bkey_start_offset(k.k) << 9,
 					       0, k.k->size << 9,
+					       k.k->size << 9,
 					       flags|
 					       FIEMAP_EXTENT_DELALLOC|
 					       FIEMAP_EXTENT_UNWRITTEN);

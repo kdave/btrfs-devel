@@ -99,7 +99,8 @@ static int ioctl_fibmap(struct file *filp, int __user *p)
  * @fieinfo:	Fiemap context passed into ->fiemap
  * @logical:	Extent logical start offset, in bytes
  * @phys:	Extent physical start offset, in bytes
- * @len:	Extent length, in bytes
+ * @log_len:	Extent logical length, in bytes
+ * @phys_len:	Extent physical length, in bytes
  * @flags:	FIEMAP_EXTENT flags that describe this extent
  *
  * Called from file system ->fiemap callback. Will populate extent
@@ -110,7 +111,7 @@ static int ioctl_fibmap(struct file *filp, int __user *p)
  * extent that will fit in user array.
  */
 int fiemap_fill_next_extent(struct fiemap_extent_info *fieinfo, u64 logical,
-			    u64 phys, u64 len, u32 flags)
+			    u64 phys, u64 log_len, u64 phys_len, u32 flags)
 {
 	struct fiemap_extent extent;
 	struct fiemap_extent __user *dest = fieinfo->fi_extents_start;
@@ -138,8 +139,8 @@ int fiemap_fill_next_extent(struct fiemap_extent_info *fieinfo, u64 logical,
 	memset(&extent, 0, sizeof(extent));
 	extent.fe_logical = logical;
 	extent.fe_physical = phys;
-	extent.fe_length = len;
-	extent.fe_physical_length = len;
+	extent.fe_length = log_len;
+	extent.fe_physical_length = phys_len;
 	extent.fe_flags = flags;
 
 	dest += fieinfo->fi_extents_mapped;
