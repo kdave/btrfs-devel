@@ -73,6 +73,37 @@ int btrfs_delete_raid_extent(struct btrfs_trans_handle *trans, u64 start, u64 le
 	return ret;
 }
 
+static int replace_raid_extent_item(struct btrfs_trans_handle *trans,
+				    struct btrfs_key *key,
+				    struct btrfs_stripe_extent *stripe_extent,
+				    const size_t item_size)
+{
+	struct btrfs_fs_info *fs_info = trans->fs_info;
+	struct btrfs_root *stripe_root = fs_info->stripe_root;
+	struct btrfs_path *path;
+	int ret;
+
+	path = btrfs_alloc_path();
+	if (!path)
+		return -ENOMEM;
+
+	ret = btrfs_search_slot(trans, stripe_root, key, path, -1, 1);
+	if (ret)
+		goto err;
+
+	ret = btrfs_del_item(trans, stripe_root, path);
+	if (ret)
+		goto err;
+
+	btrfs_free_path(path);
+
+	return btrfs_insert_item(trans, stripe_root, key, stripe_extent,
+				 item_size);
+ err:
+	btrfs_free_path(path);
+	return ret;
+}
+
 static int btrfs_insert_one_raid_extent(struct btrfs_trans_handle *trans,
 					struct btrfs_io_context *bioc)
 {
@@ -112,6 +143,9 @@ static int btrfs_insert_one_raid_extent(struct btrfs_trans_handle *trans,
 
 	ret = btrfs_insert_item(trans, stripe_root, &stripe_key, stripe_extent,
 				item_size);
+	if (ret == -EEXIST)
+		ret = replace_raid_extent_item(trans, &stripe_key,
+					       stripe_extent, item_size);
 	if (ret)
 		btrfs_abort_transaction(trans, ret);
 
