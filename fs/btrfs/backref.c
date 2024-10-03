@@ -3313,8 +3313,16 @@ static int handle_indirect_tree_backref(struct btrfs_trans_handle *trans,
 	root = btrfs_get_fs_root(fs_info, ref_key->offset, false);
 	if (IS_ERR(root))
 		return PTR_ERR(root);
-	if (!test_bit(BTRFS_ROOT_SHAREABLE, &root->state))
-		cur->cowonly = 1;
+
+	/*
+	 * We shouldn't be using backref cache for non shareable roots, ASSERT
+	 * for developers, return -EUCLEAN for users.
+	 */
+	if (!test_bit(BTRFS_ROOT_SHAREABLE, &root->state)) {
+		btrfs_put_root(root);
+		ASSERT(0);
+		return -EUCLEAN;
+	}
 
 	if (btrfs_root_level(&root->root_item) == cur->level) {
 		/* Tree root */
@@ -3400,8 +3408,20 @@ static int handle_indirect_tree_backref(struct btrfs_trans_handle *trans,
 				goto out;
 			}
 			upper->owner = btrfs_header_owner(eb);
-			if (!test_bit(BTRFS_ROOT_SHAREABLE, &root->state))
-				upper->cowonly = 1;
+
+			/*
+			 * We shouldn't be using backref cache for non shareable
+			 * roots, ASSERT for developers, return -EUCLEAN for
+			 * users.
+			 */
+			if (!test_bit(BTRFS_ROOT_SHAREABLE, &root->state)) {
+				btrfs_put_root(root);
+				btrfs_backref_free_edge(cache, edge);
+				btrfs_backref_free_node(cache, upper);
+				ASSERT(0);
+				ret = -EUCLEAN;
+				goto out;
+			}
 
 			/*
 			 * If we know the block isn't shared we can avoid
@@ -3592,15 +3612,12 @@ int btrfs_backref_finish_upper_links(struct btrfs_backref_cache *cache,
 
 	ASSERT(start->checked);
 
-	/* Insert this node to cache if it's not COW-only */
-	if (!start->cowonly) {
-		rb_node = rb_simple_insert(&cache->rb_root, start->bytenr,
-					   &start->rb_node);
-		if (rb_node)
-			btrfs_backref_panic(cache->fs_info, start->bytenr,
-					    -EEXIST);
-		list_add_tail(&start->lower, &cache->leaves);
-	}
+	rb_node = rb_simple_insert(&cache->rb_root, start->bytenr,
+				   &start->rb_node);
+	if (rb_node)
+		btrfs_backref_panic(cache->fs_info, start->bytenr,
+				    -EEXIST);
+	list_add_tail(&start->lower, &cache->leaves);
 
 	/*
 	 * Use breadth first search to iterate all related edges.
@@ -3654,21 +3671,12 @@ int btrfs_backref_finish_upper_links(struct btrfs_backref_cache *cache,
 			return -EUCLEAN;
 		}
 
-		/* Sanity check, COW-only node has non-COW-only parent */
-		if (start->cowonly != upper->cowonly) {
-			ASSERT(0);
+		rb_node = rb_simple_insert(&cache->rb_root, upper->bytenr,
+					   &upper->rb_node);
+		if (rb_node) {
+			btrfs_backref_panic(cache->fs_info,
+					    upper->bytenr, -EEXIST);
 			return -EUCLEAN;
-		}
-
-		/* Only cache non-COW-only (subvolume trees) tree blocks */
-		if (!upper->cowonly) {
-			rb_node = rb_simple_insert(&cache->rb_root, upper->bytenr,
-						   &upper->rb_node);
-			if (rb_node) {
-				btrfs_backref_panic(cache->fs_info,
-						upper->bytenr, -EEXIST);
-				return -EUCLEAN;
-			}
 		}
 
 		list_add_tail(&edge->list[UPPER], &upper->lower);
