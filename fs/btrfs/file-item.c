@@ -401,6 +401,13 @@ blk_status_t btrfs_lookup_bio_sums(struct btrfs_bio *bbio)
 		path->skip_locking = 1;
 	}
 
+	/* See the comment on btrfs_bio_ctrl->commit_root_csum. */
+	if (bbio->commit_root_csum) {
+		path->search_commit_root = 1;
+		path->skip_locking = 1;
+		down_read(&fs_info->commit_root_sem);
+	}
+
 	while (bio_offset < orig_len) {
 		int count;
 		u64 cur_disk_bytenr = orig_disk_bytenr + bio_offset;
@@ -445,6 +452,9 @@ blk_status_t btrfs_lookup_bio_sums(struct btrfs_bio *bbio)
 		}
 		bio_offset += count * sectorsize;
 	}
+
+	if (bbio->commit_root_csum)
+		up_read(&fs_info->commit_root_sem);
 
 	btrfs_free_path(path);
 	return ret;

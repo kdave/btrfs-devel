@@ -48,6 +48,7 @@ struct btrfs_bio {
 			u8 *csum;
 			u8 csum_inline[BTRFS_BIO_INLINE_CSUM_SIZE];
 			struct bvec_iter saved_iter;
+			bool commit_root_csum;
 		};
 
 		/*
