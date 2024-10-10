@@ -42,7 +42,7 @@
  * and be replaced with calls into generic code.
  */
 static noinline int btrfs_copy_from_user(loff_t pos, size_t write_bytes,
-					 struct page *page,
+					 struct folio *folio,
 					 struct iov_iter *i)
 {
 	size_t copied = 0;
@@ -55,10 +55,10 @@ static noinline int btrfs_copy_from_user(loff_t pos, size_t write_bytes,
 		/*
 		 * Copy data from userspace to the current page
 		 */
-		copied = copy_page_from_iter_atomic(page, offset, count, i);
+		copied = copy_folio_from_iter_atomic(folio, offset, count, i);
 
 		/* Flush processor's dcache for this page */
-		flush_dcache_page(page);
+		flush_dcache_folio(folio);
 
 		/*
 		 * if we get a partial write, we can end up with
@@ -70,7 +70,7 @@ static noinline int btrfs_copy_from_user(loff_t pos, size_t write_bytes,
 		 * back to page at a time copies after we return 0.
 		 */
 		if (unlikely(copied < count)) {
-			if (!PageUptodate(page)) {
+			if (!folio_test_uptodate(folio)) {
 				iov_iter_revert(i, copied);
 				copied = 0;
 			}
@@ -88,24 +88,24 @@ static noinline int btrfs_copy_from_user(loff_t pos, size_t write_bytes,
 /*
  * unlocks pages after btrfs_file_write is done with them
  */
-static void btrfs_drop_page(struct btrfs_fs_info *fs_info,
-			    struct page *page, u64 pos, u64 copied)
+static void btrfs_drop_folio(struct btrfs_fs_info *fs_info,
+			     struct folio *folio, u64 pos, u64 copied)
 {
 	u64 block_start = round_down(pos, fs_info->sectorsize);
 	u64 block_len = round_up(pos + copied, fs_info->sectorsize) - block_start;
 
 	ASSERT(block_len <= U32_MAX);
 	/*
-	 * Page checked is some magic around finding pages that
-	 * have been modified without going through btrfs_set_page_dirty
-	 * clear it here. There should be no need to mark the pages
-	 * accessed as prepare_one_page() should have marked them accessed
-	 * in prepare_one_page() via find_or_create_page()
+	 * Folio checked is some magic around finding folios that
+	 * have been modified without going through btrfs_dirty_folio().
+	 * Clear it here. There should be no need to mark the pages
+	 * accessed as prepare_one_folio() should have marked them accessed
+	 * in prepare_one_folio() via find_or_create_page()
 	 */
-	btrfs_folio_clamp_clear_checked(fs_info, page_folio(page),
+	btrfs_folio_clamp_clear_checked(fs_info, folio,
 					block_start, block_len);
-	unlock_page(page);
-	put_page(page);
+	folio_unlock(folio);
+	folio_put(folio);
 }
 
 /*
@@ -115,9 +115,9 @@ static void btrfs_drop_page(struct btrfs_fs_info *fs_info,
  * - Mark modified pages as Uptodate/Dirty and not needing COW fixup
  * - Update inode size for past EOF write
  */
-int btrfs_dirty_page(struct btrfs_inode *inode, struct page *page,
-		     loff_t pos, size_t write_bytes,
-		     struct extent_state **cached, bool noreserve)
+int btrfs_dirty_folio(struct btrfs_inode *inode, struct folio *folio,
+		      loff_t pos, size_t write_bytes,
+		      struct extent_state **cached, bool noreserve)
 {
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
 	int ret = 0;
@@ -125,7 +125,6 @@ int btrfs_dirty_page(struct btrfs_inode *inode, struct page *page,
 	u64 start_pos;
 	u64 end_of_last_block;
 	u64 end_pos = pos + write_bytes;
-	struct folio *folio = page_folio(page);
 	loff_t isize = i_size_read(&inode->vfs_inode);
 	unsigned int extra_bits = 0;
 
@@ -841,11 +840,10 @@ out:
  * on error we return an unlocked page and the error value
  * on success we return a locked page and 0
  */
-static int prepare_uptodate_page(struct inode *inode,
-				 struct page *page, u64 pos,
-				 u64 len, bool force_uptodate)
+static int prepare_uptodate_folio(struct inode *inode,
+				  struct folio *folio, u64 pos,
+				  u64 len, bool force_uptodate)
 {
-	struct folio *folio = page_folio(page);
 	u64 clamp_start = max_t(u64, pos, folio_pos(folio));
 	u64 clamp_end = min_t(u64, pos + len, folio_pos(folio) + folio_size(folio));
 	int ret = 0;
@@ -876,21 +874,11 @@ static int prepare_uptodate_page(struct inode *inode,
 	 * The private flag check is essential for subpage as we need to store
 	 * extra bitmap using folio private.
 	 */
-	if (page->mapping != inode->i_mapping || !folio_test_private(folio)) {
+	if (folio->mapping != inode->i_mapping || !folio_test_private(folio)) {
 		folio_unlock(folio);
 		return -EAGAIN;
 	}
 	return 0;
-}
-
-static fgf_t get_prepare_fgp_flags(bool nowait)
-{
-	fgf_t fgp_flags = FGP_LOCK | FGP_ACCESSED | FGP_CREAT;
-
-	if (nowait)
-		fgp_flags |= FGP_NOWAIT;
-
-	return fgp_flags;
 }
 
 static gfp_t get_prepare_gfp_flags(struct inode *inode, bool nowait)
@@ -909,45 +897,46 @@ static gfp_t get_prepare_gfp_flags(struct inode *inode, bool nowait)
 /*
  * this just gets page into the page cache and locks them down.
  */
-static noinline int prepare_one_page(struct inode *inode, struct page **page_ret,
-				     loff_t pos, size_t write_bytes,
-				     bool force_uptodate, bool nowait)
+static noinline int prepare_one_folio(struct inode *inode, struct folio **folio_ret,
+				      loff_t pos, size_t write_bytes,
+				      bool force_uptodate, bool nowait)
 {
 	unsigned long index = pos >> PAGE_SHIFT;
 	gfp_t mask = get_prepare_gfp_flags(inode, nowait);
-	fgf_t fgp_flags = get_prepare_fgp_flags(nowait);
-	struct page *page;
+	fgf_t fgp_flags = nowait ? FGP_WRITEBEGIN | FGP_NOWAIT : FGP_WRITEBEGIN;
+	struct folio *folio;
 	int ret = 0;
 
 again:
-	page = pagecache_get_page(inode->i_mapping, index, fgp_flags,
-				  mask | __GFP_WRITE);
-	if (!page) {
+	folio = __filemap_get_folio(inode->i_mapping, index, fgp_flags,
+				    mask);
+	if (IS_ERR(folio)) {
 		if (nowait)
 			ret = -EAGAIN;
 		else
-			ret = -ENOMEM;
+			ret = PTR_ERR(folio);
 		return ret;
 	}
-	ret = set_page_extent_mapped(page);
+	/* Only support page sized folio yet. */
+	ASSERT(folio_order(folio) == 0);
+	ret = set_folio_extent_mapped(folio);
 	if (ret < 0) {
-		unlock_page(page);
-		put_page(page);
+		folio_unlock(folio);
+		folio_put(folio);
 		return ret;
 	}
-	ret = prepare_uptodate_page(inode, page, pos, write_bytes,
-				    force_uptodate);
+	ret = prepare_uptodate_folio(inode, folio, pos, write_bytes,
+				     force_uptodate);
 	if (ret) {
 		/* The page is already unlocked. */
-		put_page(page);
+		folio_put(folio);
 		if (!nowait && ret == -EAGAIN) {
 			ret = 0;
 			goto again;
 		}
 		return ret;
 	}
-	wait_on_page_writeback(page);
-	*page_ret = page;
+	*folio_ret = folio;
 	return 0;
 }
 
@@ -961,7 +950,7 @@ again:
  * -EAGAIN - need re-prepare the pages
  */
 static noinline int
-lock_and_cleanup_extent_if_need(struct btrfs_inode *inode, struct page *page,
+lock_and_cleanup_extent_if_need(struct btrfs_inode *inode, struct folio *folio,
 				loff_t pos, size_t write_bytes,
 				u64 *lockstart, u64 *lockend, bool nowait,
 				struct extent_state **cached_state)
@@ -980,8 +969,8 @@ lock_and_cleanup_extent_if_need(struct btrfs_inode *inode, struct page *page,
 		if (nowait) {
 			if (!try_lock_extent(&inode->io_tree, start_pos, last_pos,
 					     cached_state)) {
-				unlock_page(page);
-				put_page(page);
+				folio_unlock(folio);
+				folio_put(folio);
 				return -EAGAIN;
 			}
 		} else {
@@ -995,8 +984,8 @@ lock_and_cleanup_extent_if_need(struct btrfs_inode *inode, struct page *page,
 		    ordered->file_offset <= last_pos) {
 			unlock_extent(&inode->io_tree, start_pos, last_pos,
 				      cached_state);
-			unlock_page(page);
-			put_page(page);
+			folio_unlock(folio);
+			folio_put(folio);
 			btrfs_start_ordered_extent(ordered);
 			btrfs_put_ordered_extent(ordered);
 			return -EAGAIN;
@@ -1010,10 +999,10 @@ lock_and_cleanup_extent_if_need(struct btrfs_inode *inode, struct page *page,
 	}
 
 	/*
-	 * We should be called after prepare_one_page() which should have locked
+	 * We should be called after prepare_one_folio() which should have locked
 	 * all pages in the range.
 	 */
-	WARN_ON(!PageLocked(page));
+	WARN_ON(!folio_test_locked(folio));
 
 	return ret;
 }
@@ -1195,12 +1184,12 @@ ssize_t btrfs_buffered_write(struct kiocb *iocb, struct iov_iter *i)
 		size_t copied;
 		size_t dirty_sectors;
 		size_t num_sectors;
-		struct page *page = NULL;
+		struct folio *folio = NULL;
 		int extents_locked;
 		bool force_page_uptodate = false;
 
 		/*
-		 * Fault pages before locking them in prepare_one_page()
+		 * Fault pages before locking them in prepare_one_folio()
 		 * to avoid recursive lock
 		 */
 		if (unlikely(fault_in_iov_iter_readable(i, write_bytes))) {
@@ -1266,8 +1255,8 @@ again:
 			break;
 		}
 
-		ret = prepare_one_page(inode, &page, pos, write_bytes,
-				       force_page_uptodate, false);
+		ret = prepare_one_folio(inode, &folio, pos, write_bytes,
+					force_page_uptodate, false);
 		if (ret) {
 			btrfs_delalloc_release_extents(BTRFS_I(inode),
 						       reserve_bytes);
@@ -1275,7 +1264,7 @@ again:
 		}
 
 		extents_locked = lock_and_cleanup_extent_if_need(
-				BTRFS_I(inode), page,
+				BTRFS_I(inode), folio,
 				pos, write_bytes, &lockstart,
 				&lockend, nowait, &cached_state);
 		if (extents_locked < 0) {
@@ -1288,7 +1277,7 @@ again:
 			break;
 		}
 
-		copied = btrfs_copy_from_user(pos, write_bytes, page, i);
+		copied = btrfs_copy_from_user(pos, write_bytes, folio, i);
 
 		num_sectors = BTRFS_BYTES_TO_BLKS(fs_info, reserve_bytes);
 		dirty_sectors = round_up(copied + sector_offset,
@@ -1320,7 +1309,7 @@ again:
 		release_bytes = round_up(copied + sector_offset,
 					fs_info->sectorsize);
 
-		ret = btrfs_dirty_page(BTRFS_I(inode), page,
+		ret = btrfs_dirty_folio(BTRFS_I(inode), folio,
 					pos, copied, &cached_state,
 					only_release_metadata);
 
@@ -1339,7 +1328,7 @@ again:
 
 		btrfs_delalloc_release_extents(BTRFS_I(inode), reserve_bytes);
 		if (ret) {
-			btrfs_drop_page(fs_info, page, pos, copied);
+			btrfs_drop_folio(fs_info, folio, pos, copied);
 			break;
 		}
 
@@ -1347,7 +1336,7 @@ again:
 		if (only_release_metadata)
 			btrfs_check_nocow_unlock(BTRFS_I(inode));
 
-		btrfs_drop_page(fs_info, page, pos, copied);
+		btrfs_drop_folio(fs_info, folio, pos, copied);
 
 		cond_resched();
 
