@@ -482,6 +482,13 @@ static void btrfs_submit_mirrored_bio(struct btrfs_io_context *bioc, int dev_nr)
 static void btrfs_submit_bio(struct bio *bio, struct btrfs_io_context *bioc,
 			     struct btrfs_io_stripe *smap, int mirror_num)
 {
+	/*
+	 * It is important to clear the bits we used in bio->bi_flags.  Because
+	 * bio->bi_flags belongs to the block layer, we should avoid leaving
+	 * stray bits set when we transfer ownership of the bio by submitting it.
+	 */
+	btrfs_bio_clear_csum_search_commit_root(btrfs_bio(bio));
+
 	if (!bioc) {
 		/* Single mirror read/write fast path. */
 		btrfs_bio(bio)->mirror_num = mirror_num;
@@ -587,7 +594,7 @@ static bool should_async_write(struct btrfs_bio *bbio)
 {
 	bool auto_csum_mode = true;
 
-#ifdef CONFIG_BTRFS_DEBUG
+#ifdef CONFIG_BTRFS_EXPERIMENTAL
 	struct btrfs_fs_devices *fs_devices = bbio->fs_info->fs_devices;
 	enum btrfs_offload_csum_mode csum_mode = READ_ONCE(fs_devices->offload_csum_mode);
 
