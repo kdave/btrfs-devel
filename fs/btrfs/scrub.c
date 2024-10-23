@@ -1536,7 +1536,8 @@ static int scrub_find_fill_first_stripe(struct btrfs_block_group *bg,
 	}
 
 	/* Now fill the data csum. */
-	if (bg->flags & BTRFS_BLOCK_GROUP_DATA) {
+	if (!test_bit(BTRFS_FS_STATE_NO_DATA_CSUMS, &fs_info->fs_state) &&
+	    bg->flags & BTRFS_BLOCK_GROUP_DATA) {
 		int sector_nr;
 		unsigned long csum_bitmap = 0;
 
