@@ -786,6 +786,8 @@ int lookup_inline_extent_backref(struct btrfs_trans_handle *trans,
 	int ret;
 	bool skinny_metadata = btrfs_fs_incompat(fs_info, SKINNY_METADATA);
 	int needed;
+	bool keep_locks = false;
+	struct btrfs_key tmp_key;
 
 	key.objectid = bytenr;
 	key.type = BTRFS_EXTENT_ITEM_KEY;
@@ -795,7 +797,6 @@ int lookup_inline_extent_backref(struct btrfs_trans_handle *trans,
 	if (insert) {
 		extra_size = btrfs_extent_inline_ref_size(want);
 		path->search_for_extension = 1;
-		path->keep_locks = 1;
 	} else
 		extra_size = -1;
 
@@ -946,6 +947,24 @@ again:
 			ret = -EAGAIN;
 			goto out;
 		}
+
+		if (path->slots[0] + 1 < btrfs_header_nritems(path->nodes[0])) {
+			btrfs_item_key_to_cpu(path->nodes[0], &tmp_key, path->slots[0] + 1);
+			if (tmp_key.objectid == bytenr &&
+				tmp_key.type < BTRFS_BLOCK_GROUP_ITEM_KEY) {
+				ret = -EAGAIN;
+				goto out;
+			}
+			goto enoent;
+		}
+
+		if (!keep_locks) {
+			btrfs_release_path(path);
+			path->keep_locks = 1;
+			keep_locks = true;
+			goto again;
+		}
+
 		/*
 		 * To add new inline back ref, we have to make sure
 		 * there is no corresponding back ref item.
@@ -959,13 +978,15 @@ again:
 			goto out;
 		}
 	}
+enoent:
 	*ref_ret = (struct btrfs_extent_inline_ref *)ptr;
 out:
-	if (insert) {
+	if (keep_locks) {
 		path->keep_locks = 0;
-		path->search_for_extension = 0;
 		btrfs_unlock_up_safe(path, 1);
 	}
+	if (insert)
+		path->search_for_extension = 0;
 	return ret;
 }
 
@@ -5165,8 +5186,16 @@ struct extent_buffer *btrfs_alloc_tree_block(struct btrfs_trans_handle *trans,
 			parent = ins.objectid;
 		flags |= BTRFS_BLOCK_FLAG_FULL_BACKREF;
 		owning_root = reloc_src_root;
-	} else
-		BUG_ON(parent > 0);
+	} else {
+		if (unlikely(parent > 0)) {
+			/*
+			 * Other roots than reloc tree don't expect start
+			 * offset of a parent block.
+			 */
+			ret = -EUCLEAN;
+			goto out_free_reserved;
+		}
+	}
 
 	if (root_objectid != BTRFS_TREE_LOG_OBJECTID) {
 		struct btrfs_delayed_extent_op *extent_op;
