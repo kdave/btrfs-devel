@@ -401,6 +401,33 @@ blk_status_t btrfs_lookup_bio_sums(struct btrfs_bio *bbio)
 		path->skip_locking = 1;
 	}
 
+	/*
+	 * If we are searching for a csum of an extent from a past transaction,
+	 * we can search in the commit root and reduce lock contention on the
+	 * csum tree root node's extent buffer.
+	 *
+	 * This is important because that lock is an rwswem which gets pretty
+	 * heavy write load, unlike commit_root_sem.
+	 *
+	 * Due to how rwsem is implemented, there is a possible priority
+	 * inversion where the readers holding the lock don't get scheduled
+	 * (say they're in a cgroup stuck in heavy reclaim) which then blocks
+	 * writers, including transaction commit. By using a semaphore with
+	 * fewer writers (only a commit switching the roots), we make this
+	 * issue less likely.
+	 *
+	 * Note that we don't rely on btrfs_search_slot to lock
+	 * commit_root_sem. We call search_slot multiple times, which would
+	 * create a potential race where a commit comes in between searches
+	 * while we are not holding commit_root_sem, and we get csums from
+	 * across transactions.
+	 */
+	if (btrfs_bio_csum_search_commit_root(bbio)) {
+		path->search_commit_root = 1;
+		path->skip_locking = 1;
+		down_read(&fs_info->commit_root_sem);
+	}
+
 	while (bio_offset < orig_len) {
 		int count;
 		u64 cur_disk_bytenr = orig_disk_bytenr + bio_offset;
@@ -445,6 +472,9 @@ blk_status_t btrfs_lookup_bio_sums(struct btrfs_bio *bbio)
 		}
 		bio_offset += count * sectorsize;
 	}
+
+	if (btrfs_bio_csum_search_commit_root(bbio))
+		up_read(&fs_info->commit_root_sem);
 
 	btrfs_free_path(path);
 	return ret;

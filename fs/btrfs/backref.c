@@ -3021,9 +3021,6 @@ void btrfs_backref_init_cache(struct btrfs_fs_info *fs_info,
 	cache->rb_root = RB_ROOT;
 	for (i = 0; i < BTRFS_MAX_LEVEL; i++)
 		INIT_LIST_HEAD(&cache->pending[i]);
-	INIT_LIST_HEAD(&cache->changed);
-	INIT_LIST_HEAD(&cache->detached);
-	INIT_LIST_HEAD(&cache->leaves);
 	INIT_LIST_HEAD(&cache->pending_edge);
 	INIT_LIST_HEAD(&cache->useless_node);
 	cache->fs_info = fs_info;
@@ -3131,29 +3128,17 @@ void btrfs_backref_drop_node(struct btrfs_backref_cache *tree,
 void btrfs_backref_cleanup_node(struct btrfs_backref_cache *cache,
 				struct btrfs_backref_node *node)
 {
-	struct btrfs_backref_node *upper;
 	struct btrfs_backref_edge *edge;
 
 	if (!node)
 		return;
 
-	BUG_ON(!node->lowest && !node->detached);
 	while (!list_empty(&node->upper)) {
 		edge = list_entry(node->upper.next, struct btrfs_backref_edge,
 				  list[LOWER]);
-		upper = edge->node[UPPER];
 		list_del(&edge->list[LOWER]);
 		list_del(&edge->list[UPPER]);
 		btrfs_backref_free_edge(cache, edge);
-
-		/*
-		 * Add the node to leaf node list if no other child block
-		 * cached.
-		 */
-		if (list_empty(&upper->lower)) {
-			list_add_tail(&upper->lower, &cache->leaves);
-			upper->lowest = 1;
-		}
 	}
 
 	btrfs_backref_drop_node(cache, node);
@@ -3165,33 +3150,13 @@ void btrfs_backref_cleanup_node(struct btrfs_backref_cache *cache,
 void btrfs_backref_release_cache(struct btrfs_backref_cache *cache)
 {
 	struct btrfs_backref_node *node;
-	int i;
 
-	while (!list_empty(&cache->detached)) {
-		node = list_entry(cache->detached.next,
-				  struct btrfs_backref_node, list);
+	while ((node = rb_entry_safe(rb_first(&cache->rb_root),
+				     struct btrfs_backref_node, rb_node)))
 		btrfs_backref_cleanup_node(cache, node);
-	}
 
-	while (!list_empty(&cache->leaves)) {
-		node = list_entry(cache->leaves.next,
-				  struct btrfs_backref_node, lower);
-		btrfs_backref_cleanup_node(cache, node);
-	}
-
-	for (i = 0; i < BTRFS_MAX_LEVEL; i++) {
-		while (!list_empty(&cache->pending[i])) {
-			node = list_first_entry(&cache->pending[i],
-						struct btrfs_backref_node,
-						list);
-			btrfs_backref_cleanup_node(cache, node);
-		}
-	}
 	ASSERT(list_empty(&cache->pending_edge));
 	ASSERT(list_empty(&cache->useless_node));
-	ASSERT(list_empty(&cache->changed));
-	ASSERT(list_empty(&cache->detached));
-	ASSERT(RB_EMPTY_ROOT(&cache->rb_root));
 	ASSERT(!cache->nr_nodes);
 	ASSERT(!cache->nr_edges);
 }
@@ -3315,8 +3280,16 @@ static int handle_indirect_tree_backref(struct btrfs_trans_handle *trans,
 	root = btrfs_get_fs_root(fs_info, ref_key->offset, false);
 	if (IS_ERR(root))
 		return PTR_ERR(root);
-	if (!test_bit(BTRFS_ROOT_SHAREABLE, &root->state))
-		cur->cowonly = 1;
+
+	/*
+	 * We shouldn't be using backref cache for non shareable roots, ASSERT
+	 * for developers, return -EUCLEAN for users.
+	 */
+	if (!test_bit(BTRFS_ROOT_SHAREABLE, &root->state)) {
+		btrfs_put_root(root);
+		ASSERT(0);
+		return -EUCLEAN;
+	}
 
 	if (btrfs_root_level(&root->root_item) == cur->level) {
 		/* Tree root */
@@ -3402,8 +3375,20 @@ static int handle_indirect_tree_backref(struct btrfs_trans_handle *trans,
 				goto out;
 			}
 			upper->owner = btrfs_header_owner(eb);
-			if (!test_bit(BTRFS_ROOT_SHAREABLE, &root->state))
-				upper->cowonly = 1;
+
+			/*
+			 * We shouldn't be using backref cache for non shareable
+			 * roots, ASSERT for developers, return -EUCLEAN for
+			 * users.
+			 */
+			if (!test_bit(BTRFS_ROOT_SHAREABLE, &root->state)) {
+				btrfs_put_root(root);
+				btrfs_backref_free_edge(cache, edge);
+				btrfs_backref_free_node(cache, upper);
+				ASSERT(0);
+				ret = -EUCLEAN;
+				goto out;
+			}
 
 			/*
 			 * If we know the block isn't shared we can avoid
@@ -3594,15 +3579,11 @@ int btrfs_backref_finish_upper_links(struct btrfs_backref_cache *cache,
 
 	ASSERT(start->checked);
 
-	/* Insert this node to cache if it's not COW-only */
-	if (!start->cowonly) {
-		rb_node = rb_simple_insert(&cache->rb_root, start->bytenr,
-					   &start->rb_node);
-		if (rb_node)
-			btrfs_backref_panic(cache->fs_info, start->bytenr,
-					    -EEXIST);
-		list_add_tail(&start->lower, &cache->leaves);
-	}
+	rb_node = rb_simple_insert(&cache->rb_root, start->bytenr,
+				   &start->rb_node);
+	if (rb_node)
+		btrfs_backref_panic(cache->fs_info, start->bytenr,
+				    -EEXIST);
 
 	/*
 	 * Use breadth first search to iterate all related edges.
@@ -3641,11 +3622,6 @@ int btrfs_backref_finish_upper_links(struct btrfs_backref_cache *cache,
 		 * parents have already been linked.
 		 */
 		if (!RB_EMPTY_NODE(&upper->rb_node)) {
-			if (upper->lowest) {
-				list_del_init(&upper->lower);
-				upper->lowest = 0;
-			}
-
 			list_add_tail(&edge->list[UPPER], &upper->lower);
 			continue;
 		}
@@ -3656,21 +3632,12 @@ int btrfs_backref_finish_upper_links(struct btrfs_backref_cache *cache,
 			return -EUCLEAN;
 		}
 
-		/* Sanity check, COW-only node has non-COW-only parent */
-		if (start->cowonly != upper->cowonly) {
-			ASSERT(0);
+		rb_node = rb_simple_insert(&cache->rb_root, upper->bytenr,
+					   &upper->rb_node);
+		if (rb_node) {
+			btrfs_backref_panic(cache->fs_info,
+					    upper->bytenr, -EEXIST);
 			return -EUCLEAN;
-		}
-
-		/* Only cache non-COW-only (subvolume trees) tree blocks */
-		if (!upper->cowonly) {
-			rb_node = rb_simple_insert(&cache->rb_root, upper->bytenr,
-						   &upper->rb_node);
-			if (rb_node) {
-				btrfs_backref_panic(cache->fs_info,
-						upper->bytenr, -EEXIST);
-				return -EUCLEAN;
-			}
 		}
 
 		list_add_tail(&edge->list[UPPER], &upper->lower);
