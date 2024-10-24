@@ -613,9 +613,18 @@ int btrfs_encoded_io_compression_from_extent(struct btrfs_fs_info *fs_info,
 					     int compress_type);
 int btrfs_encoded_read_regular_fill_pages(struct btrfs_inode *inode,
 					  u64 disk_bytenr, u64 disk_io_size,
-					  struct page **pages);
+					  struct page **pages,
+					  void *uring_ctx);
 ssize_t btrfs_encoded_read(struct kiocb *iocb, struct iov_iter *iter,
-			   struct btrfs_ioctl_encoded_io_args *encoded);
+			   struct btrfs_ioctl_encoded_io_args *encoded,
+			   struct extent_state **cached_state,
+			   u64 *disk_bytenr, u64 *disk_io_size);
+ssize_t btrfs_encoded_read_regular(struct kiocb *iocb, struct iov_iter *iter,
+				   u64 start, u64 lockend,
+				   struct extent_state **cached_state,
+				   u64 disk_bytenr, u64 disk_io_size,
+				   size_t count, bool compressed,
+				   bool *unlocked);
 ssize_t btrfs_do_encoded_write(struct kiocb *iocb, struct iov_iter *from,
 			       const struct btrfs_ioctl_encoded_io_args *encoded);
 
