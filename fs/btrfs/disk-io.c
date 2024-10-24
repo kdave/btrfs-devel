@@ -917,8 +917,7 @@ fail:
 	return ERR_PTR(ret);
 }
 
-static struct btrfs_root *alloc_log_tree(struct btrfs_trans_handle *trans,
-					 struct btrfs_fs_info *fs_info)
+static struct btrfs_root *alloc_log_tree(struct btrfs_fs_info *fs_info)
 {
 	struct btrfs_root *root;
 
@@ -966,7 +965,7 @@ int btrfs_init_log_root_tree(struct btrfs_trans_handle *trans,
 {
 	struct btrfs_root *log_root;
 
-	log_root = alloc_log_tree(trans, fs_info);
+	log_root = alloc_log_tree(fs_info);
 	if (IS_ERR(log_root))
 		return PTR_ERR(log_root);
 
@@ -992,7 +991,7 @@ int btrfs_add_log_tree(struct btrfs_trans_handle *trans,
 	struct btrfs_inode_item *inode_item;
 	int ret;
 
-	log_root = alloc_log_tree(trans, fs_info);
+	log_root = alloc_log_tree(fs_info);
 	if (IS_ERR(log_root))
 		return PTR_ERR(log_root);
 
@@ -2786,6 +2785,7 @@ void btrfs_init_fs_info(struct btrfs_fs_info *fs_info)
 	btrfs_init_scrub(fs_info);
 	btrfs_init_balance(fs_info);
 	btrfs_init_async_reclaim_work(fs_info);
+	btrfs_init_extent_map_shrinker_work(fs_info);
 
 	rwlock_init(&fs_info->block_group_cache_lock);
 	fs_info->block_group_cache_tree = RB_ROOT_CACHED;
@@ -2851,8 +2851,6 @@ static int init_mount_fs_info(struct btrfs_fs_info *fs_info, struct super_block 
 	ret = percpu_counter_init(&fs_info->evictable_extent_maps, 0, GFP_KERNEL);
 	if (ret)
 		return ret;
-
-	spin_lock_init(&fs_info->extent_map_shrinker_lock);
 
 	ret = percpu_counter_init(&fs_info->dirty_metadata_bytes, 0, GFP_KERNEL);
 	if (ret)
@@ -3202,8 +3200,7 @@ int btrfs_check_features(struct btrfs_fs_info *fs_info, bool is_rw_mount)
 	return 0;
 }
 
-int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_devices,
-		      const char *options)
+int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_devices)
 {
 	u32 sectorsize;
 	u32 nodesize;
@@ -4294,6 +4291,7 @@ void __cold close_ctree(struct btrfs_fs_info *fs_info)
 	cancel_work_sync(&fs_info->async_reclaim_work);
 	cancel_work_sync(&fs_info->async_data_reclaim_work);
 	cancel_work_sync(&fs_info->preempt_reclaim_work);
+	cancel_work_sync(&fs_info->em_shrinker_work);
 
 	/* Cancel or finish ongoing discard work */
 	btrfs_discard_cleanup(fs_info);
