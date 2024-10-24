@@ -226,6 +226,7 @@ struct scrub_warning {
 	u64			physical;
 	u64			logical;
 	struct btrfs_device	*dev;
+	bool			message_printed;
 };
 
 static void release_scrub_stripe(struct scrub_stripe *stripe)
@@ -388,43 +389,19 @@ nomem:
 static int scrub_print_warning_inode(u64 inum, u64 offset, u64 num_bytes,
 				     u64 root, void *warn_ctx)
 {
-	u32 nlink;
 	int ret;
 	int i;
 	unsigned nofs_flag;
-	struct extent_buffer *eb;
-	struct btrfs_inode_item *inode_item;
 	struct scrub_warning *swarn = warn_ctx;
 	struct btrfs_fs_info *fs_info = swarn->dev->fs_info;
 	struct inode_fs_paths *ipath = NULL;
 	struct btrfs_root *local_root;
-	struct btrfs_key key;
 
 	local_root = btrfs_get_fs_root(fs_info, root, true);
 	if (IS_ERR(local_root)) {
 		ret = PTR_ERR(local_root);
 		goto err;
 	}
-
-	/*
-	 * this makes the path point to (inum INODE_ITEM ioff)
-	 */
-	key.objectid = inum;
-	key.type = BTRFS_INODE_ITEM_KEY;
-	key.offset = 0;
-
-	ret = btrfs_search_slot(NULL, local_root, &key, swarn->path, 0, 0);
-	if (ret) {
-		btrfs_put_root(local_root);
-		btrfs_release_path(swarn->path);
-		goto err;
-	}
-
-	eb = swarn->path->nodes[0];
-	inode_item = btrfs_item_ptr(eb, swarn->path->slots[0],
-					struct btrfs_inode_item);
-	nlink = btrfs_inode_nlink(eb, inode_item);
-	btrfs_release_path(swarn->path);
 
 	/*
 	 * init_path might indirectly call vmalloc, or use GFP_KERNEL. Scrub
@@ -449,34 +426,35 @@ static int scrub_print_warning_inode(u64 inum, u64 offset, u64 num_bytes,
 	 * we deliberately ignore the bit ipath might have been too small to
 	 * hold all of the paths here
 	 */
-	for (i = 0; i < ipath->fspath->elem_cnt; ++i)
-		btrfs_warn_in_rcu(fs_info,
-"%s at logical %llu on dev %s, physical %llu, root %llu, inode %llu, offset %llu, length %u, links %u (path: %s)",
+	for (i = 0; i < ipath->fspath->elem_cnt; ++i) {
+		btrfs_warn_rl_in_rcu(fs_info,
+"%s at logical %llu on dev %s, physical %llu, root %llu, inode %llu, offset %llu, path: %s",
 				  swarn->errstr, swarn->logical,
 				  btrfs_dev_name(swarn->dev),
 				  swarn->physical,
 				  root, inum, offset,
-				  fs_info->sectorsize, nlink,
 				  (char *)(unsigned long)ipath->fspath->val[i]);
+		swarn->message_printed = true;
+	}
 
 	btrfs_put_root(local_root);
 	free_ipath(ipath);
 	return 0;
 
 err:
-	btrfs_warn_in_rcu(fs_info,
+	btrfs_warn_rl_in_rcu(fs_info,
 			  "%s at logical %llu on dev %s, physical %llu, root %llu, inode %llu, offset %llu: path resolving failed with ret=%d",
 			  swarn->errstr, swarn->logical,
 			  btrfs_dev_name(swarn->dev),
 			  swarn->physical,
 			  root, inum, offset, ret);
-
+	swarn->message_printed = true;
 	free_ipath(ipath);
 	return 0;
 }
 
 static void scrub_print_common_warning(const char *errstr, struct btrfs_device *dev,
-				       bool is_super, u64 logical, u64 physical)
+				       u64 logical, u64 physical)
 {
 	struct btrfs_fs_info *fs_info = dev->fs_info;
 	struct btrfs_path *path;
@@ -488,12 +466,6 @@ static void scrub_print_common_warning(const char *errstr, struct btrfs_device *
 	u32 item_size;
 	int ret;
 
-	/* Super block error, no need to search extent tree. */
-	if (is_super) {
-		btrfs_warn_in_rcu(fs_info, "%s on device %s, physical %llu",
-				  errstr, btrfs_dev_name(dev), physical);
-		return;
-	}
 	path = btrfs_alloc_path();
 	if (!path)
 		return;
@@ -502,6 +474,7 @@ static void scrub_print_common_warning(const char *errstr, struct btrfs_device *
 	swarn.logical = logical;
 	swarn.errstr = errstr;
 	swarn.dev = NULL;
+	swarn.message_printed = false;
 
 	ret = extent_from_logical(fs_info, swarn.logical, path, &found_key,
 				  &flags);
@@ -523,20 +496,22 @@ static void scrub_print_common_warning(const char *errstr, struct btrfs_device *
 			ret = tree_backref_for_extent(&ptr, eb, &found_key, ei,
 						      item_size, &ref_root,
 						      &ref_level);
-			if (ret < 0) {
-				btrfs_warn(fs_info,
-				"failed to resolve tree backref for logical %llu: %d",
-						  swarn.logical, ret);
+			if (ret < 0)
 				break;
-			}
 			if (ret > 0)
 				break;
-			btrfs_warn_in_rcu(fs_info,
+			btrfs_warn_rl_in_rcu(fs_info,
 "%s at logical %llu on dev %s, physical %llu: metadata %s (level %d) in tree %llu",
 				errstr, swarn.logical, btrfs_dev_name(dev),
 				swarn.physical, (ref_level ? "node" : "leaf"),
 				ref_level, ref_root);
+			swarn.message_printed = true;
 		}
+		if (!swarn.message_printed)
+			btrfs_warn_rl_in_rcu(fs_info,
+			"%s at metadata, logical %llu on dev %s physical %llu",
+					  errstr, swarn.logical,
+					  btrfs_dev_name(dev), swarn.physical);
 		btrfs_release_path(path);
 	} else {
 		struct btrfs_backref_walk_ctx ctx = { 0 };
@@ -551,6 +526,11 @@ static void scrub_print_common_warning(const char *errstr, struct btrfs_device *
 		swarn.dev = dev;
 
 		iterate_extent_inodes(&ctx, true, scrub_print_warning_inode, &swarn);
+		if (!swarn.message_printed)
+			btrfs_warn_rl_in_rcu(fs_info,
+	"%s at data, filename unresolved, logical %llu on dev %s physical %llu",
+					  errstr, swarn.logical,
+					  btrfs_dev_name(dev), swarn.physical);
 	}
 
 out:
@@ -866,11 +846,9 @@ static void scrub_stripe_submit_repair_read(struct scrub_stripe *stripe,
 static void scrub_stripe_report_errors(struct scrub_ctx *sctx,
 				       struct scrub_stripe *stripe)
 {
-	static DEFINE_RATELIMIT_STATE(rs, DEFAULT_RATELIMIT_INTERVAL,
-				      DEFAULT_RATELIMIT_BURST);
 	struct btrfs_fs_info *fs_info = sctx->fs_info;
-	struct btrfs_device *dev = NULL;
-	u64 physical = 0;
+	struct btrfs_device *dev = stripe->dev;
+	u64 stripe_physical = stripe->physical;
 	int nr_data_sectors = 0;
 	int nr_meta_sectors = 0;
 	int nr_nodatacsum_sectors = 0;
@@ -880,36 +858,12 @@ static void scrub_stripe_report_errors(struct scrub_ctx *sctx,
 	if (test_bit(SCRUB_STRIPE_FLAG_NO_REPORT, &stripe->state))
 		return;
 
-	/*
-	 * Init needed infos for error reporting.
-	 *
-	 * Although our scrub_stripe infrastructure is mostly based on btrfs_submit_bio()
-	 * thus no need for dev/physical, error reporting still needs dev and physical.
-	 */
-	if (!bitmap_empty(&stripe->init_error_bitmap, stripe->nr_sectors)) {
-		u64 mapped_len = fs_info->sectorsize;
-		struct btrfs_io_context *bioc = NULL;
-		int stripe_index = stripe->mirror_num - 1;
-		int ret;
-
-		/* For scrub, our mirror_num should always start at 1. */
-		ASSERT(stripe->mirror_num >= 1);
-		ret = btrfs_map_block(fs_info, BTRFS_MAP_GET_READ_MIRRORS,
-				      stripe->logical, &mapped_len, &bioc,
-				      NULL, NULL);
-		/*
-		 * If we failed, dev will be NULL, and later detailed reports
-		 * will just be skipped.
-		 */
-		if (ret < 0)
-			goto skip;
-		physical = bioc->stripes[stripe_index].physical;
-		dev = bioc->stripes[stripe_index].dev;
-		btrfs_put_bioc(bioc);
-	}
-
-skip:
+	ASSERT(dev);
 	for_each_set_bit(sector_nr, &stripe->extent_sector_bitmap, stripe->nr_sectors) {
+		const u64 logical = stripe->logical +
+				    (sector_nr << fs_info->sectorsize_bits);
+		const u64 physical = stripe_physical +
+				     (sector_nr << fs_info->sectorsize_bits);
 		bool repaired = false;
 
 		if (stripe->sectors[sector_nr].is_metadata) {
@@ -935,43 +889,23 @@ skip:
 		 * output the message of repaired message.
 		 */
 		if (repaired) {
-			if (dev) {
-				btrfs_err_rl_in_rcu(fs_info,
+			btrfs_err_rl_in_rcu(fs_info,
 			"fixed up error at logical %llu on dev %s physical %llu",
-					    stripe->logical, btrfs_dev_name(dev),
+					    logical, btrfs_dev_name(dev),
 					    physical);
-			} else {
-				btrfs_err_rl_in_rcu(fs_info,
-			"fixed up error at logical %llu on mirror %u",
-					    stripe->logical, stripe->mirror_num);
-			}
 			continue;
 		}
 
 		/* The remaining are all for unrepaired. */
-		if (dev) {
-			btrfs_err_rl_in_rcu(fs_info,
-	"unable to fixup (regular) error at logical %llu on dev %s physical %llu",
-					    stripe->logical, btrfs_dev_name(dev),
-					    physical);
-		} else {
-			btrfs_err_rl_in_rcu(fs_info,
-	"unable to fixup (regular) error at logical %llu on mirror %u",
-					    stripe->logical, stripe->mirror_num);
-		}
-
 		if (test_bit(sector_nr, &stripe->io_error_bitmap))
-			if (__ratelimit(&rs) && dev)
-				scrub_print_common_warning("i/o error", dev, false,
-						     stripe->logical, physical);
+			scrub_print_common_warning("i/o error", dev,
+						     logical, physical);
 		if (test_bit(sector_nr, &stripe->csum_error_bitmap))
-			if (__ratelimit(&rs) && dev)
-				scrub_print_common_warning("checksum error", dev, false,
-						     stripe->logical, physical);
+			scrub_print_common_warning("checksum error", dev,
+						     logical, physical);
 		if (test_bit(sector_nr, &stripe->meta_error_bitmap))
-			if (__ratelimit(&rs) && dev)
-				scrub_print_common_warning("header error", dev, false,
-						     stripe->logical, physical);
+			scrub_print_common_warning("header error", dev,
+						     logical, physical);
 	}
 
 	spin_lock(&sctx->stat_lock);
@@ -1602,7 +1536,8 @@ static int scrub_find_fill_first_stripe(struct btrfs_block_group *bg,
 	}
 
 	/* Now fill the data csum. */
-	if (bg->flags & BTRFS_BLOCK_GROUP_DATA) {
+	if (!test_bit(BTRFS_FS_STATE_NO_DATA_CSUMS, &fs_info->fs_state) &&
+	    bg->flags & BTRFS_BLOCK_GROUP_DATA) {
 		int sector_nr;
 		unsigned long csum_bitmap = 0;
 
@@ -1656,8 +1591,7 @@ static u32 stripe_length(const struct scrub_stripe *stripe)
 		   stripe->bg->start + stripe->bg->length - stripe->logical);
 }
 
-static void scrub_submit_extent_sector_read(struct scrub_ctx *sctx,
-					    struct scrub_stripe *stripe)
+static void scrub_submit_extent_sector_read(struct scrub_stripe *stripe)
 {
 	struct btrfs_fs_info *fs_info = stripe->bg->fs_info;
 	struct btrfs_bio *bbio = NULL;
@@ -1704,8 +1638,18 @@ static void scrub_submit_extent_sector_read(struct scrub_ctx *sctx,
 					      &stripe_len, &bioc, &io_stripe, &mirror);
 			btrfs_put_bioc(bioc);
 			if (err < 0) {
-				set_bit(i, &stripe->io_error_bitmap);
-				set_bit(i, &stripe->error_bitmap);
+				if (err != -ENODATA) {
+					/*
+					 * Earlier btrfs_get_raid_extent_offset()
+					 * returned -ENODATA, which means there's
+					 * no entry for the corresponding range
+					 * in the stripe tree.  But if it's in
+					 * the extent tree, then it's a preallocated
+					 * extent and not an error.
+					 */
+					set_bit(i, &stripe->io_error_bitmap);
+					set_bit(i, &stripe->error_bitmap);
+				}
 				continue;
 			}
 
@@ -1743,7 +1687,7 @@ static void scrub_submit_initial_read(struct scrub_ctx *sctx,
 	ASSERT(test_bit(SCRUB_STRIPE_FLAG_INITIALIZED, &stripe->state));
 
 	if (btrfs_need_stripe_tree_update(fs_info, stripe->bg->flags)) {
-		scrub_submit_extent_sector_read(sctx, stripe);
+		scrub_submit_extent_sector_read(stripe);
 		return;
 	}
 
@@ -1954,7 +1898,7 @@ static int scrub_raid56_parity_stripe(struct scrub_ctx *sctx,
 	ASSERT(sctx->raid56_data_stripes);
 
 	/*
-	 * For data stripe search, we cannot re-use the same extent/csum paths,
+	 * For data stripe search, we cannot reuse the same extent/csum paths,
 	 * as the data stripe bytenr may be smaller than previous extent.  Thus
 	 * we have to use our own extent/csum paths.
 	 */
@@ -2103,7 +2047,6 @@ out:
  */
 static int scrub_simple_mirror(struct scrub_ctx *sctx,
 			       struct btrfs_block_group *bg,
-			       struct btrfs_chunk_map *map,
 			       u64 logical_start, u64 logical_length,
 			       struct btrfs_device *device,
 			       u64 physical, int mirror_num)
@@ -2222,7 +2165,7 @@ static int scrub_simple_stripe(struct scrub_ctx *sctx,
 		 * just RAID1, so we can reuse scrub_simple_mirror() to scrub
 		 * this stripe.
 		 */
-		ret = scrub_simple_mirror(sctx, bg, map, cur_logical,
+		ret = scrub_simple_mirror(sctx, bg, cur_logical,
 					  BTRFS_STRIPE_LEN, device, cur_physical,
 					  mirror_num);
 		if (ret)
@@ -2256,7 +2199,6 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
 	/* Offset inside the chunk */
 	u64 offset;
 	u64 stripe_logical;
-	int stop_loop = 0;
 
 	/* Extent_path should be released by now. */
 	ASSERT(sctx->extent_path.nodes[0] == NULL);
@@ -2307,7 +2249,7 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
 		 * Only @physical and @mirror_num needs to calculated using
 		 * @stripe_index.
 		 */
-		ret = scrub_simple_mirror(sctx, bg, map, bg->start, bg->length,
+		ret = scrub_simple_mirror(sctx, bg, bg->start, bg->length,
 				scrub_dev, map->stripes[stripe_index].physical,
 				stripe_index + 1);
 		offset = 0;
@@ -2362,7 +2304,7 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
 		 * We can reuse scrub_simple_mirror() here, as the repair part
 		 * is still based on @mirror_num.
 		 */
-		ret = scrub_simple_mirror(sctx, bg, map, logical, BTRFS_STRIPE_LEN,
+		ret = scrub_simple_mirror(sctx, bg, logical, BTRFS_STRIPE_LEN,
 					  scrub_dev, physical, 1);
 		if (ret < 0)
 			goto out;
@@ -2370,14 +2312,8 @@ next:
 		logical += increment;
 		physical += BTRFS_STRIPE_LEN;
 		spin_lock(&sctx->stat_lock);
-		if (stop_loop)
-			sctx->stat.last_physical =
-				map->stripes[stripe_index].physical + dev_stripe_len;
-		else
-			sctx->stat.last_physical = physical;
+		sctx->stat.last_physical = physical;
 		spin_unlock(&sctx->stat_lock);
-		if (stop_loop)
-			break;
 	}
 out:
 	ret2 = flush_scrub_stripes(sctx);
