@@ -5088,7 +5088,7 @@ static noinline void reada_walk_down(struct btrfs_trans_handle *trans,
 			goto reada;
 
 		if (wc->stage == UPDATE_BACKREF &&
-		    generation <= root->root_key.offset)
+		    generation <= btrfs_root_origin_generation(root))
 			continue;
 
 		/* We don't lock the tree block, it's OK to be racy here */
@@ -5116,7 +5116,7 @@ static noinline void reada_walk_down(struct btrfs_trans_handle *trans,
 			    (flags & BTRFS_BLOCK_FLAG_FULL_BACKREF))
 				continue;
 			if (!wc->update_ref ||
-			    generation <= root->root_key.offset)
+			    generation <= btrfs_root_origin_generation(root))
 				continue;
 			btrfs_node_key_to_cpu(eb, &key, slot);
 			ret = btrfs_comp_cpu_keys(&key,
@@ -5279,7 +5279,7 @@ static noinline int do_walk_down(struct btrfs_trans_handle *trans,
 	 * for the subtree
 	 */
 	if (wc->stage == UPDATE_BACKREF &&
-	    generation <= root->root_key.offset) {
+	    generation <= btrfs_root_origin_generation(root)) {
 		*lookup_info = 1;
 		return 1;
 	}
@@ -5325,7 +5325,7 @@ static noinline int do_walk_down(struct btrfs_trans_handle *trans,
 				goto skip;
 
 			if (!wc->update_ref ||
-			    generation <= root->root_key.offset)
+			    generation <= btrfs_root_origin_generation(root))
 				goto skip;
 
 			btrfs_node_key_to_cpu(path->nodes[level], &key,
