@@ -757,8 +757,11 @@ static void submit_extent_folio(struct btrfs_bio_ctrl *bio_ctrl,
 	ASSERT(bio_ctrl->end_io_func);
 
 	if (bio_ctrl->bbio &&
-	    !btrfs_bio_is_contig(bio_ctrl, folio, disk_bytenr, pg_offset))
+	    !btrfs_bio_is_contig(bio_ctrl, folio, disk_bytenr, pg_offset)) {
+		if (folio_test_dropbehind(folio))
+			bio_ctrl->bbio->uncached_io = true;
 		submit_one_bio(bio_ctrl);
+	}
 
 	do {
 		u32 len = size;
@@ -775,6 +778,9 @@ static void submit_extent_folio(struct btrfs_bio_ctrl *bio_ctrl,
 			ASSERT(is_data_inode(inode));
 			len = bio_ctrl->len_to_oe_boundary;
 		}
+
+		if (folio_test_dropbehind(folio))
+			bio_ctrl->bbio->uncached_io = true;
 
 		if (!bio_add_folio(&bio_ctrl->bbio->bio, folio, len, pg_offset)) {
 			/* bio full: move on to a new one */

@@ -857,18 +857,17 @@ static gfp_t get_prepare_gfp_flags(struct inode *inode, bool nowait)
  */
 static noinline int prepare_one_folio(struct inode *inode, struct folio **folio_ret,
 				      loff_t pos, size_t write_bytes,
-				      bool force_uptodate, bool nowait)
+				      bool force_uptodate, fgf_t fgp_flags)
 {
 	unsigned long index = pos >> PAGE_SHIFT;
-	gfp_t mask = get_prepare_gfp_flags(inode, nowait);
-	fgf_t fgp_flags = (nowait ? FGP_WRITEBEGIN | FGP_NOWAIT : FGP_WRITEBEGIN);
+	gfp_t mask = get_prepare_gfp_flags(inode, fgp_flags & FGP_NOWAIT);
 	struct folio *folio;
 	int ret = 0;
 
 again:
 	folio = __filemap_get_folio(inode->i_mapping, index, fgp_flags, mask);
 	if (IS_ERR(folio)) {
-		if (nowait)
+		if (fgp_flags & FGP_NOWAIT)
 			ret = -EAGAIN;
 		else
 			ret = PTR_ERR(folio);
@@ -886,7 +885,7 @@ again:
 	if (ret) {
 		/* The folio is already unlocked. */
 		folio_put(folio);
-		if (!nowait && ret == -EAGAIN) {
+		if (!(fgp_flags & FGP_NOWAIT) && ret == -EAGAIN) {
 			ret = 0;
 			goto again;
 		}
@@ -1094,9 +1093,15 @@ ssize_t btrfs_buffered_write(struct kiocb *iocb, struct iov_iter *i)
 	const bool nowait = (iocb->ki_flags & IOCB_NOWAIT);
 	unsigned int bdp_flags = (nowait ? BDP_ASYNC : 0);
 	bool only_release_metadata = false;
+	fgf_t fgp_flags = FGP_WRITEBEGIN;
 
-	if (nowait)
+	if (nowait) {
 		ilock_flags |= BTRFS_ILOCK_TRY;
+		fgp_flags |= FGP_NOWAIT;
+	}
+
+	if (iocb->ki_flags & IOCB_DONTCACHE)
+		fgp_flags |= FGP_DONTCACHE;
 
 	ret = btrfs_inode_lock(BTRFS_I(inode), ilock_flags);
 	if (ret < 0)
@@ -1192,7 +1197,7 @@ again:
 		}
 
 		ret = prepare_one_folio(inode, &folio, pos, write_bytes,
-					force_page_uptodate, false);
+					force_page_uptodate, fgp_flags);
 		if (ret) {
 			btrfs_delalloc_release_extents(BTRFS_I(inode),
 						       reserve_bytes);
@@ -3668,7 +3673,7 @@ const struct file_operations btrfs_file_operations = {
 #endif
 	.remap_file_range = btrfs_remap_file_range,
 	.uring_cmd	= btrfs_uring_cmd,
-	.fop_flags	= FOP_BUFFER_RASYNC | FOP_BUFFER_WASYNC,
+	.fop_flags	= FOP_BUFFER_RASYNC | FOP_BUFFER_WASYNC | FOP_DONTCACHE,
 };
 
 int btrfs_fdatawrite_range(struct btrfs_inode *inode, loff_t start, loff_t end)
