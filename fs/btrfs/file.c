@@ -941,7 +941,7 @@ lock_and_cleanup_extent_if_need(struct btrfs_inode *inode, struct folio *folio,
 				      cached_state);
 			folio_unlock(folio);
 			folio_put(folio);
-			btrfs_start_ordered_extent(ordered);
+			btrfs_start_ordered_extent(ordered, 0, 0);
 			btrfs_put_ordered_extent(ordered);
 			return -EAGAIN;
 		}
@@ -1855,7 +1855,7 @@ again:
 		unlock_extent(io_tree, page_start, page_end, &cached_state);
 		folio_unlock(folio);
 		up_read(&BTRFS_I(inode)->i_mmap_lock);
-		btrfs_start_ordered_extent(ordered);
+		btrfs_start_ordered_extent(ordered, 0, 0);
 		btrfs_put_ordered_extent(ordered);
 		goto again;
 	}

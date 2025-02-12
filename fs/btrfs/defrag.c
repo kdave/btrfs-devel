@@ -902,7 +902,7 @@ again:
 			break;
 
 		folio_unlock(folio);
-		btrfs_start_ordered_extent(ordered);
+		btrfs_start_ordered_extent(ordered, 0, 0);
 		btrfs_put_ordered_extent(ordered);
 		folio_lock(folio);
 		/*

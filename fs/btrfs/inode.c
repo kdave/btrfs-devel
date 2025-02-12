@@ -2813,7 +2813,7 @@ again:
 		unlock_extent(&inode->io_tree, page_start, page_end,
 			      &cached_state);
 		folio_unlock(folio);
-		btrfs_start_ordered_extent(ordered);
+		btrfs_start_ordered_extent(ordered, 0, 0);
 		btrfs_put_ordered_extent(ordered);
 		goto again;
 	}
@@ -4865,7 +4865,7 @@ again:
 		unlock_extent(io_tree, block_start, block_end, &cached_state);
 		folio_unlock(folio);
 		folio_put(folio);
-		btrfs_start_ordered_extent(ordered);
+		btrfs_start_ordered_extent(ordered, 0, 0);
 		btrfs_put_ordered_extent(ordered);
 		goto again;
 	}
