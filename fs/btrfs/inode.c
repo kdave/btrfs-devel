@@ -6780,6 +6780,7 @@ static noinline int uncompress_inline(struct btrfs_path *path,
 {
 	int ret;
 	struct extent_buffer *leaf = path->nodes[0];
+	const u32 sectorsize = leaf->fs_info->sectorsize;
 	char *tmp;
 	size_t max_size;
 	unsigned long inline_size;
@@ -6808,17 +6809,19 @@ static noinline int uncompress_inline(struct btrfs_path *path,
 	 * cover that region here.
 	 */
 
-	if (max_size < PAGE_SIZE)
-		folio_zero_range(folio, max_size, PAGE_SIZE - max_size);
+	if (max_size < sectorsize)
+		folio_zero_range(folio, max_size, sectorsize - max_size);
 	kfree(tmp);
 	return ret;
 }
 
-static int read_inline_extent(struct btrfs_path *path, struct folio *folio)
+static int read_inline_extent(struct btrfs_fs_info *fs_info,
+			      struct btrfs_path *path, struct folio *folio)
 {
 	struct btrfs_file_extent_item *fi;
 	void *kaddr;
 	size_t copy_size;
+	const u32 sectorsize = fs_info->sectorsize;
 
 	if (!folio || folio_test_uptodate(folio))
 		return 0;
@@ -6836,8 +6839,8 @@ static int read_inline_extent(struct btrfs_path *path, struct folio *folio)
 	read_extent_buffer(path->nodes[0], kaddr,
 			   btrfs_file_extent_inline_start(fi), copy_size);
 	kunmap_local(kaddr);
-	if (copy_size < PAGE_SIZE)
-		folio_zero_range(folio, copy_size, PAGE_SIZE - copy_size);
+	if (copy_size < sectorsize)
+		folio_zero_range(folio, copy_size, sectorsize - copy_size);
 	return 0;
 }
 
@@ -7012,7 +7015,7 @@ next:
 		ASSERT(em->disk_bytenr == EXTENT_MAP_INLINE);
 		ASSERT(em->len == fs_info->sectorsize);
 
-		ret = read_inline_extent(path, folio);
+		ret = read_inline_extent(fs_info, path, folio);
 		if (ret < 0)
 			goto out;
 		goto insert;
