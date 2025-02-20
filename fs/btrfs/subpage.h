@@ -84,26 +84,20 @@ static inline bool btrfs_meta_is_subpage(const struct btrfs_fs_info *fs_info)
 {
 	return fs_info->nodesize < PAGE_SIZE;
 }
-static inline bool btrfs_is_subpage(const struct btrfs_fs_info *fs_info,
-				    struct address_space *mapping)
-{
-	if (mapping && mapping->host)
-		ASSERT(is_data_inode(BTRFS_I(mapping->host)));
-	return fs_info->sectorsize < PAGE_SIZE;
-}
 #else
 static inline bool btrfs_meta_is_subpage(const struct btrfs_fs_info *fs_info)
 {
 	return false;
 }
-static inline bool btrfs_is_subpage(const struct btrfs_fs_info *fs_info,
-				    struct address_space *mapping)
-{
-	if (mapping && mapping->host)
-		ASSERT(is_data_inode(BTRFS_I(mapping->host)));
-	return false;
-}
 #endif
+
+static inline bool btrfs_is_subpage(const struct btrfs_fs_info *fs_info,
+				    struct folio *folio)
+{
+	if (folio_mapped(folio) && folio->mapping && folio->mapping->host)
+		ASSERT(is_data_inode(BTRFS_I(folio->mapping->host)));
+	return fs_info->sectorsize < folio_size(folio);
+}
 
 int btrfs_attach_subpage(const struct btrfs_fs_info *fs_info,
 			 struct folio *folio, enum btrfs_subpage_type type);
@@ -112,7 +106,7 @@ void btrfs_detach_subpage(const struct btrfs_fs_info *fs_info, struct folio *fol
 
 /* Allocate additional data where page represents more than one sector */
 struct btrfs_subpage *btrfs_alloc_subpage(const struct btrfs_fs_info *fs_info,
-					  enum btrfs_subpage_type type);
+					  size_t fsize, enum btrfs_subpage_type type);
 void btrfs_free_subpage(struct btrfs_subpage *subpage);
 
 void btrfs_folio_inc_eb_refs(const struct btrfs_fs_info *fs_info, struct folio *folio);
