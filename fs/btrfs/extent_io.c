@@ -865,25 +865,22 @@ static int attach_extent_buffer_folio(struct extent_buffer *eb,
 	return ret;
 }
 
-int set_folio_extent_mapped(struct folio *folio)
+int btrfs_set_folio_subpage(struct folio *folio)
 {
-	struct btrfs_fs_info *fs_info;
+	struct btrfs_fs_info *fs_info = folio_to_fs_info(folio);
 
 	ASSERT(folio->mapping);
+
+	if (!btrfs_is_subpage(fs_info, folio->mapping))
+		return 0;
 
 	if (folio_test_private(folio))
 		return 0;
 
-	fs_info = folio_to_fs_info(folio);
-
-	if (btrfs_is_subpage(fs_info, folio))
-		return btrfs_attach_subpage(fs_info, folio, BTRFS_SUBPAGE_DATA);
-
-	folio_attach_private(folio, (void *)EXTENT_FOLIO_PRIVATE);
-	return 0;
+	return btrfs_attach_subpage(fs_info, folio, BTRFS_SUBPAGE_DATA);
 }
 
-void clear_folio_extent_mapped(struct folio *folio)
+void btrfs_clear_folio_subpage(struct folio *folio)
 {
 	struct btrfs_fs_info *fs_info;
 
@@ -893,10 +890,11 @@ void clear_folio_extent_mapped(struct folio *folio)
 		return;
 
 	fs_info = folio_to_fs_info(folio);
-	if (btrfs_is_subpage(fs_info, folio))
-		return btrfs_detach_subpage(fs_info, folio, BTRFS_SUBPAGE_DATA);
 
-	folio_detach_private(folio);
+	if (!btrfs_is_subpage(fs_info, folio))
+		return;
+
+	btrfs_detach_subpage(fs_info, folio, BTRFS_SUBPAGE_DATA);
 }
 
 static struct extent_map *get_extent_map(struct btrfs_inode *inode,
@@ -949,7 +947,7 @@ static int btrfs_do_readpage(struct folio *folio, struct extent_map **em_cached,
 	int ret = 0;
 	const size_t blocksize = fs_info->sectorsize;
 
-	ret = set_folio_extent_mapped(folio);
+	ret = btrfs_set_folio_subpage(folio);
 	if (ret < 0) {
 		folio_unlock(folio);
 		return ret;
@@ -1732,7 +1730,7 @@ static int extent_writepage(struct folio *folio, struct btrfs_bio_ctrl *bio_ctrl
 	 * The proper bitmap can only be initialized until writepage_delalloc().
 	 */
 	bio_ctrl->submit_bitmap = (unsigned long)-1;
-	ret = set_folio_extent_mapped(folio);
+	ret = btrfs_set_folio_subpage(folio);
 	if (ret < 0)
 		goto done;
 
