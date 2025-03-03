@@ -1099,8 +1099,17 @@ ssize_t btrfs_buffered_write(struct kiocb *iocb, struct iov_iter *i)
 		fgp_flags |= FGP_NOWAIT;
 	}
 
+	/*
+	 * DONTCACHE will make folio reclaim happen immediately at
+	 * folio_end_writeback(), for fs block size < page size cases it will
+	 * happen inside a spinlock (due to possible async extents races),
+	 * and such folio_end_writeback() may cause sleep inside a spinlock.
+	 *
+	 * So disable DONTCACHE until we either reworked async extent, or find
+	 * a better way to handle per-block writeback tracking.
+	 */
 	if (iocb->ki_flags & IOCB_DONTCACHE)
-		fgp_flags |= FGP_DONTCACHE;
+		return -EOPNOTSUPP;
 
 	ret = btrfs_inode_lock(BTRFS_I(inode), ilock_flags);
 	if (ret < 0)
@@ -3679,7 +3688,7 @@ const struct file_operations btrfs_file_operations = {
 #endif
 	.remap_file_range = btrfs_remap_file_range,
 	.uring_cmd	= btrfs_uring_cmd,
-	.fop_flags	= FOP_BUFFER_RASYNC | FOP_BUFFER_WASYNC | FOP_DONTCACHE,
+	.fop_flags	= FOP_BUFFER_RASYNC | FOP_BUFFER_WASYNC,
 };
 
 int btrfs_fdatawrite_range(struct btrfs_inode *inode, loff_t start, loff_t end)
