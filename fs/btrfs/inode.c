@@ -6793,6 +6793,7 @@ static noinline int uncompress_inline(struct btrfs_path *path,
 {
 	int ret;
 	struct extent_buffer *leaf = path->nodes[0];
+	const u32 sectorsize = leaf->fs_info->sectorsize;
 	char *tmp;
 	size_t max_size;
 	unsigned long inline_size;
@@ -6809,7 +6810,7 @@ static noinline int uncompress_inline(struct btrfs_path *path,
 
 	read_extent_buffer(leaf, tmp, ptr, inline_size);
 
-	max_size = min_t(unsigned long, PAGE_SIZE, max_size);
+	max_size = min_t(unsigned long, sectorsize, max_size);
 	ret = btrfs_decompress(compress_type, tmp, folio, 0, inline_size,
 			       max_size);
 
@@ -6821,14 +6822,15 @@ static noinline int uncompress_inline(struct btrfs_path *path,
 	 * cover that region here.
 	 */
 
-	if (max_size < PAGE_SIZE)
-		folio_zero_range(folio, max_size, PAGE_SIZE - max_size);
+	if (max_size < sectorsize)
+		folio_zero_range(folio, max_size, sectorsize - max_size);
 	kfree(tmp);
 	return ret;
 }
 
 static int read_inline_extent(struct btrfs_path *path, struct folio *folio)
 {
+	const u32 sectorsize = path->nodes[0]->fs_info->sectorsize;
 	struct btrfs_file_extent_item *fi;
 	void *kaddr;
 	size_t copy_size;
@@ -6843,14 +6845,14 @@ static int read_inline_extent(struct btrfs_path *path, struct folio *folio)
 	if (btrfs_file_extent_compression(path->nodes[0], fi) != BTRFS_COMPRESS_NONE)
 		return uncompress_inline(path, folio, fi);
 
-	copy_size = min_t(u64, PAGE_SIZE,
+	copy_size = min_t(u64, sectorsize,
 			  btrfs_file_extent_ram_bytes(path->nodes[0], fi));
 	kaddr = kmap_local_folio(folio, 0);
 	read_extent_buffer(path->nodes[0], kaddr,
 			   btrfs_file_extent_inline_start(fi), copy_size);
 	kunmap_local(kaddr);
-	if (copy_size < PAGE_SIZE)
-		folio_zero_range(folio, copy_size, PAGE_SIZE - copy_size);
+	if (copy_size < sectorsize)
+		folio_zero_range(folio, copy_size, sectorsize - copy_size);
 	return 0;
 }
 
