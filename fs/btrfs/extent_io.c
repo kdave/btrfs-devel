@@ -478,7 +478,7 @@ static void begin_folio_read(struct btrfs_fs_info *fs_info, struct folio *folio)
 	if (!btrfs_is_subpage(fs_info, folio))
 		return;
 
-	ASSERT(folio_test_private(folio));
+	ASSERT(mapping_release_always(folio->mapping));
 	btrfs_folio_set_lock(fs_info, folio, folio_pos(folio), folio_size(folio));
 }
 

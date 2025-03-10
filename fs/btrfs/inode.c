@@ -5585,6 +5585,8 @@ static int btrfs_init_locked_inode(struct inode *inode, void *p)
 	btrfs_set_inode_number(BTRFS_I(inode), args->ino);
 	BTRFS_I(inode)->root = btrfs_grab_root(args->root);
 
+	mapping_set_release_always(inode->i_mapping);
+
 	if (args->root && args->root == args->root->fs_info->tree_root &&
 	    args->ino != BTRFS_BTREE_INODE_OBJECTID)
 		set_bit(BTRFS_INODE_FREE_SPACE_INODE,
@@ -6663,6 +6665,7 @@ static int btrfs_create(struct mnt_idmap *idmap, struct inode *dir,
 	inode->i_fop = &btrfs_file_operations;
 	inode->i_op = &btrfs_file_inode_operations;
 	inode->i_mapping->a_ops = &btrfs_aops;
+	mapping_set_release_always(inode->i_mapping);
 	return btrfs_create_common(dir, dentry, inode);
 }
 
