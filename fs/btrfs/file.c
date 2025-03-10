@@ -876,7 +876,7 @@ again:
 	}
 	/* Only support page sized folio yet. */
 	ASSERT(folio_order(folio) == 0);
-	ret = set_folio_extent_mapped(folio);
+	ret = btrfs_set_folio_subpage(folio);
 	if (ret < 0) {
 		folio_unlock(folio);
 		folio_put(folio);
@@ -1902,7 +1902,7 @@ again:
 	folio_wait_writeback(folio);
 
 	lock_extent(io_tree, page_start, page_end, &cached_state);
-	ret2 = set_folio_extent_mapped(folio);
+	ret2 = btrfs_set_folio_subpage(folio);
 	if (ret2 < 0) {
 		ret = vmf_error(ret2);
 		unlock_extent(io_tree, page_start, page_end, &cached_state);

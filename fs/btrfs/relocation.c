@@ -2867,10 +2867,10 @@ again:
 
 	/*
 	 * We could have lost folio private when we dropped the lock to read the
-	 * folio above, make sure we set_folio_extent_mapped() here so we have any
+	 * folio above, make sure we btrfs_set_folio_subpage() here so we have any
 	 * of the subpage blocksize stuff we need in place.
 	 */
-	ret = set_folio_extent_mapped(folio);
+	ret = btrfs_set_folio_subpage(folio);
 	if (ret < 0)
 		goto release_folio;
 

@@ -450,7 +450,6 @@ static int io_ctl_prepare_pages(struct btrfs_io_ctl *io_ctl, bool uptodate)
 	int i;
 
 	for (i = 0; i < io_ctl->num_pages; i++) {
-		int ret;
 
 		folio = __filemap_get_folio(inode->i_mapping, i,
 					    FGP_LOCK | FGP_ACCESSED | FGP_CREAT,
@@ -458,14 +457,6 @@ static int io_ctl_prepare_pages(struct btrfs_io_ctl *io_ctl, bool uptodate)
 		if (IS_ERR(folio)) {
 			io_ctl_drop_pages(io_ctl);
 			return -ENOMEM;
-		}
-
-		ret = set_folio_extent_mapped(folio);
-		if (ret < 0) {
-			folio_unlock(folio);
-			folio_put(folio);
-			io_ctl_drop_pages(io_ctl);
-			return ret;
 		}
 
 		io_ctl->pages[i] = &folio->page;
