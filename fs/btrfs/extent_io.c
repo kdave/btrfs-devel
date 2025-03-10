@@ -846,38 +846,18 @@ static int attach_extent_buffer_folio(struct extent_buffer *eb,
 	return ret;
 }
 
-int set_folio_extent_mapped(struct folio *folio)
+int btrfs_set_folio_subpage(struct folio *folio)
 {
-	struct btrfs_fs_info *fs_info;
+	struct btrfs_fs_info *fs_info = folio_to_fs_info(folio);
 
-	ASSERT(folio->mapping);
-
-	if (folio_test_private(folio))
-		return 0;
-
-	fs_info = folio_to_fs_info(folio);
-
-	if (btrfs_is_subpage(fs_info, folio))
-		return btrfs_attach_subpage(fs_info, folio, BTRFS_SUBPAGE_DATA);
-
-	folio_attach_private(folio, (void *)EXTENT_FOLIO_PRIVATE);
-	return 0;
+	return btrfs_attach_subpage(fs_info, folio, BTRFS_SUBPAGE_DATA);
 }
 
-void clear_folio_extent_mapped(struct folio *folio)
+void btrfs_clear_folio_subpage(struct folio *folio)
 {
-	struct btrfs_fs_info *fs_info;
+	struct btrfs_fs_info *fs_info = folio_to_fs_info(folio);
 
-	ASSERT(folio->mapping);
-
-	if (!folio_test_private(folio))
-		return;
-
-	fs_info = folio_to_fs_info(folio);
-	if (btrfs_is_subpage(fs_info, folio))
-		return btrfs_detach_subpage(fs_info, folio, BTRFS_SUBPAGE_DATA);
-
-	folio_detach_private(folio);
+	btrfs_detach_subpage(fs_info, folio, BTRFS_SUBPAGE_DATA);
 }
 
 static struct extent_map *get_extent_map(struct btrfs_inode *inode,
@@ -929,7 +909,7 @@ static int btrfs_do_readpage(struct folio *folio, struct extent_map **em_cached,
 	int ret = 0;
 	const size_t blocksize = fs_info->sectorsize;
 
-	ret = set_folio_extent_mapped(folio);
+	ret = btrfs_set_folio_subpage(folio);
 	if (ret < 0) {
 		folio_unlock(folio);
 		return ret;
@@ -1714,30 +1694,7 @@ static int extent_writepage(struct folio *folio, struct btrfs_bio_ctrl *bio_ctrl
 	 */
 	bio_ctrl->submit_bitmap = (unsigned long)-1;
 
-	/*
-	 * If the page is dirty but without private set, it's marked dirty
-	 * without informing the fs.
-	 * Nowadays that is a bug, since the introduction of
-	 * pin_user_pages*().
-	 *
-	 * So here we check if the page has private set to rule out such
-	 * case.
-	 * But we also have a long history of relying on the COW fixup,
-	 * so here we only enable this check for experimental builds until
-	 * we're sure it's safe.
-	 */
-	if (IS_ENABLED(CONFIG_BTRFS_EXPERIMENTAL) &&
-	    unlikely(!folio_test_private(folio))) {
-		WARN_ON(IS_ENABLED(CONFIG_BTRFS_DEBUG));
-		btrfs_err_rl(fs_info,
-	"root %lld ino %llu folio %llu is marked dirty without notifying the fs",
-			     inode->root->root_key.objectid,
-			     btrfs_ino(inode), folio_pos(folio));
-		ret = -EUCLEAN;
-		goto done;
-	}
-
-	ret = set_folio_extent_mapped(folio);
+	ret = btrfs_set_folio_subpage(folio);
 	if (ret < 0)
 		goto done;
 

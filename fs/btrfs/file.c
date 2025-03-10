@@ -874,7 +874,7 @@ again:
 			ret = PTR_ERR(folio);
 		return ret;
 	}
-	ret = set_folio_extent_mapped(folio);
+	ret = btrfs_set_folio_subpage(folio);
 	if (ret < 0) {
 		folio_unlock(folio);
 		folio_put(folio);
@@ -1899,7 +1899,7 @@ again:
 	folio_wait_writeback(folio);
 
 	btrfs_lock_extent(io_tree, page_start, page_end, &cached_state);
-	ret2 = set_folio_extent_mapped(folio);
+	ret2 = btrfs_set_folio_subpage(folio);
 	if (ret2 < 0) {
 		ret = vmf_error(ret2);
 		btrfs_unlock_extent(io_tree, page_start, page_end, &cached_state);

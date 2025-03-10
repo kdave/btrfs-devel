@@ -4844,11 +4844,11 @@ again:
 
 	/*
 	 * We unlock the page after the io is completed and then re-lock it
-	 * above.  release_folio() could have come in between that and cleared
-	 * folio private, but left the page in the mapping.  Set the page mapped
+	 * above.  release_folio() could have come in between that,
+	 * but left the page in the mapping.  Set the page mapped
 	 * here to make sure it's properly set for the subpage stuff.
 	 */
-	ret = set_folio_extent_mapped(folio);
+	ret = btrfs_set_folio_subpage(folio);
 	if (ret < 0)
 		goto out_unlock;
 
@@ -7276,7 +7276,7 @@ static bool __btrfs_release_folio(struct folio *folio, gfp_t gfp_flags)
 {
 	if (try_release_extent_mapping(folio, gfp_flags)) {
 		wait_subpage_spinlock(folio);
-		clear_folio_extent_mapped(folio);
+		btrfs_clear_folio_subpage(folio);
 		return true;
 	}
 	return false;
@@ -7473,7 +7473,7 @@ next:
 	btrfs_folio_clear_checked(fs_info, folio, folio_pos(folio), folio_size(folio));
 	if (!inode_evicting)
 		__btrfs_release_folio(folio, GFP_NOFS);
-	clear_folio_extent_mapped(folio);
+	btrfs_clear_folio_subpage(folio);
 }
 
 static int btrfs_truncate(struct btrfs_inode *inode, bool skip_writeback)

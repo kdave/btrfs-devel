@@ -884,7 +884,7 @@ again:
 		return ERR_PTR(-ETXTBSY);
 	}
 
-	ret = set_folio_extent_mapped(folio);
+	ret = btrfs_set_folio_subpage(folio);
 	if (ret < 0) {
 		folio_unlock(folio);
 		folio_put(folio);
