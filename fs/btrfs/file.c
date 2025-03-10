@@ -831,7 +831,7 @@ static int prepare_uptodate_folio(struct inode *inode, struct folio *folio, u64 
 	 * The private flag check is essential for subpage as we need to store
 	 * extra bitmap using folio private.
 	 */
-	if (folio->mapping != inode->i_mapping || !folio_test_private(folio)) {
+	if (folio->mapping != inode->i_mapping || !mapping_release_always(folio->mapping)) {
 		folio_unlock(folio);
 		return -EAGAIN;
 	}
