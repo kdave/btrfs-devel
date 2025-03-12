@@ -8078,6 +8078,11 @@ out:
 	return ret;
 }
 
+void btrfs_chunk_map_clear_bits(struct btrfs_chunk_map *map, unsigned int bits)
+{
+	chunk_map_device_clear_bits(map, bits);
+}
+
 /*
  * Ensure that all dev extents are mapped to correct chunk, otherwise
  * later chunk allocation/free would cause unexpected behavior.
