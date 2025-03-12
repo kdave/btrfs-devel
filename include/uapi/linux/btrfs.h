@@ -1119,6 +1119,13 @@ enum btrfs_clear_op_type {
 	BTRFS_CLEAR_OP_ZERO_NOUNMAP,
 	/* Request unmapping the blocks and don't fall back to writing zeros. */
 	BTRFS_CLEAR_OP_ZERO_NOFALLBACK,
+
+	/*
+	 * Only reset status of previously cleared (by any operation) chunks,
+	 * tracked in memory since the last mount. Without that repeated calls
+	 * to clear will skip already processed chunks.
+	 */
+	BTRFS_CLEAR_OP_RESET_CHUNK_STATUS_CACHE,
 	BTRFS_NR_CLEAR_OP_TYPES,
 };
 
