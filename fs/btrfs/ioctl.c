@@ -5237,6 +5237,19 @@ static int btrfs_ioctl_clear_free(struct file *file, void __user *arg)
 	if (args.type >= BTRFS_NR_CLEAR_OP_TYPES)
 		return -EOPNOTSUPP;
 
+	if (args.type == BTRFS_CLEAR_OP_RESET_CHUNK_STATUS_CACHE) {
+		write_lock(&fs_info->mapping_tree_lock);
+		for (struct rb_node *node = rb_first_cached(&fs_info->mapping_tree);
+		     node; node = rb_next(node)) {
+			struct btrfs_chunk_map *map;
+
+			map = rb_entry(node, struct btrfs_chunk_map, rb_node);
+			btrfs_chunk_map_clear_bits(map, CHUNK_TRIMMED);
+		}
+		write_unlock(&fs_info->mapping_tree_lock);
+		return 0;
+	}
+
 	ret = mnt_want_write_file(file);
 	if (ret)
 		return ret;

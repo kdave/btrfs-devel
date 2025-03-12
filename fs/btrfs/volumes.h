@@ -785,6 +785,7 @@ struct btrfs_chunk_map *btrfs_find_chunk_map_nolock(struct btrfs_fs_info *fs_inf
 						    u64 logical, u64 length);
 struct btrfs_chunk_map *btrfs_get_chunk_map(struct btrfs_fs_info *fs_info,
 					    u64 logical, u64 length);
+void btrfs_chunk_map_clear_bits(struct btrfs_chunk_map *map, unsigned int bits);
 void btrfs_remove_chunk_map(struct btrfs_fs_info *fs_info, struct btrfs_chunk_map *map);
 void btrfs_release_disk_super(struct btrfs_super_block *super);
 
