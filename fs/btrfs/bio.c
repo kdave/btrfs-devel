@@ -156,6 +156,25 @@ static void btrfs_repair_done(struct btrfs_failed_bio *fbio)
 	}
 }
 
+static struct folio *bio_vec_get_folio(const struct bio_vec *bv)
+{
+	return page_folio(bv->bv_page + (bv->bv_offset >> PAGE_SHIFT));
+}
+
+static unsigned long bio_vec_get_folio_offset(const struct bio_vec *bv)
+{
+	struct folio *folio = bio_vec_get_folio(bv);
+
+	/*
+	 * There can be multiple physically contiguous folios queued
+	 * into the bio_vec.
+	 * Thus the first page of our folio should be at or beyond
+	 * the first page of the bio_vec.
+	 */
+	ASSERT(&folio->page >= bv->bv_page);
+	return bv->bv_offset - ((&folio->page - bv->bv_page) << PAGE_SHIFT);
+}
+
 static void btrfs_end_repair_bio(struct btrfs_bio *repair_bbio,
 				 struct btrfs_device *dev)
 {
@@ -164,12 +183,6 @@ static void btrfs_end_repair_bio(struct btrfs_bio *repair_bbio,
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
 	struct bio_vec *bv = bio_first_bvec_all(&repair_bbio->bio);
 	int mirror = repair_bbio->mirror_num;
-
-	/*
-	 * We can only trigger this for data bio, which doesn't support larger
-	 * folios yet.
-	 */
-	ASSERT(folio_order(page_folio(bv->bv_page)) == 0);
 
 	if (repair_bbio->bio.bi_status ||
 	    !btrfs_data_csum_ok(repair_bbio, dev, 0, bv)) {
@@ -192,7 +205,8 @@ static void btrfs_end_repair_bio(struct btrfs_bio *repair_bbio,
 		btrfs_repair_io_failure(fs_info, btrfs_ino(inode),
 				  repair_bbio->file_offset, fs_info->sectorsize,
 				  repair_bbio->saved_iter.bi_sector << SECTOR_SHIFT,
-				  page_folio(bv->bv_page), bv->bv_offset, mirror);
+				  bio_vec_get_folio(bv), bio_vec_get_folio_offset(bv),
+				  mirror);
 	} while (mirror != fbio->bbio->mirror_num);
 
 done:
