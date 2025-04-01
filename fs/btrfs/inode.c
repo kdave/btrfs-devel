@@ -2921,7 +2921,7 @@ static int insert_reserved_file_extent(struct btrfs_trans_handle *trans,
 {
 	struct btrfs_root *root = inode->root;
 	const u64 sectorsize = root->fs_info->sectorsize;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct extent_buffer *leaf;
 	struct btrfs_key ins;
 	u64 disk_num_bytes = btrfs_stack_file_extent_disk_num_bytes(stack_fi);
@@ -3003,8 +3003,6 @@ static int insert_reserved_file_extent(struct btrfs_trans_handle *trans,
 					       file_pos - offset,
 					       qgroup_reserved, &ins);
 out:
-	btrfs_free_path(path);
-
 	return ret;
 }
 
@@ -3530,7 +3528,7 @@ static int btrfs_orphan_del(struct btrfs_trans_handle *trans,
 int btrfs_orphan_cleanup(struct btrfs_root *root)
 {
 	struct btrfs_fs_info *fs_info = root->fs_info;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct extent_buffer *leaf;
 	struct btrfs_key key, found_key;
 	struct btrfs_trans_handle *trans;
@@ -3720,7 +3718,6 @@ int btrfs_orphan_cleanup(struct btrfs_root *root)
 out:
 	if (ret)
 		btrfs_err(fs_info, "could not do orphan cleanup %d", ret);
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -4113,7 +4110,7 @@ static noinline int btrfs_update_inode_item(struct btrfs_trans_handle *trans,
 					    struct btrfs_inode *inode)
 {
 	struct btrfs_inode_item *inode_item;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct extent_buffer *leaf;
 	struct btrfs_key key;
 	int ret;
@@ -4127,7 +4124,7 @@ static noinline int btrfs_update_inode_item(struct btrfs_trans_handle *trans,
 	if (ret) {
 		if (ret > 0)
 			ret = -ENOENT;
-		goto failed;
+		return ret;
 	}
 
 	leaf = path->nodes[0];
@@ -4136,10 +4133,7 @@ static noinline int btrfs_update_inode_item(struct btrfs_trans_handle *trans,
 
 	fill_inode_item(trans, leaf, inode_item, &inode->vfs_inode);
 	btrfs_set_inode_last_trans(trans, inode);
-	ret = 0;
-failed:
-	btrfs_free_path(path);
-	return ret;
+	return 0;
 }
 
 /*
@@ -5446,7 +5440,7 @@ static int btrfs_inode_by_name(struct btrfs_inode *dir, struct dentry *dentry,
 			       struct btrfs_key *location, u8 *type)
 {
 	struct btrfs_dir_item *di;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_root *root = dir->root;
 	int ret = 0;
 	struct fscrypt_name fname;
@@ -5457,7 +5451,7 @@ static int btrfs_inode_by_name(struct btrfs_inode *dir, struct dentry *dentry,
 
 	ret = fscrypt_setup_filename(&dir->vfs_inode, &dentry->d_name, 1, &fname);
 	if (ret < 0)
-		goto out;
+		return ret;
 	/*
 	 * fscrypt_setup_filename() should never return a positive value, but
 	 * gcc on sparc/parisc thinks it can, so assert that doesn't happen.
@@ -5486,7 +5480,6 @@ static int btrfs_inode_by_name(struct btrfs_inode *dir, struct dentry *dentry,
 		*type = btrfs_dir_ftype(path->nodes[0], di);
 out:
 	fscrypt_free_filename(&fname);
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -5501,7 +5494,7 @@ static int fixup_tree_root_location(struct btrfs_fs_info *fs_info,
 				    struct btrfs_key *location,
 				    struct btrfs_root **sub_root)
 {
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_root *new_root;
 	struct btrfs_root_ref *ref;
 	struct extent_buffer *leaf;
@@ -5557,7 +5550,6 @@ static int fixup_tree_root_location(struct btrfs_fs_info *fs_info,
 	location->offset = 0;
 	err = 0;
 out:
-	btrfs_free_path(path);
 	fscrypt_free_filename(&fname);
 	return err;
 }
@@ -5976,7 +5968,7 @@ static int btrfs_real_readdir(struct file *file, struct dir_context *ctx)
 	struct btrfs_dir_item *di;
 	struct btrfs_key key;
 	struct btrfs_key found_key;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	void *addr;
 	LIST_HEAD(ins_list);
 	LIST_HEAD(del_list);
@@ -6089,7 +6081,6 @@ nopos:
 err:
 	if (put)
 		btrfs_readdir_put_delayed_items(BTRFS_I(inode), &ins_list, &del_list);
-	btrfs_free_path(path);
 	return ret;
 }
 
