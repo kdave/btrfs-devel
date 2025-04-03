@@ -32,8 +32,7 @@ static noinline int process_page_range(struct inode *inode, u64 start, u64 end,
 	folio_batch_init(&fbatch);
 
 	while (index <= end_index) {
-		ret = filemap_get_folios_contig(inode->i_mapping, &index,
-				end_index, &fbatch);
+		ret = filemap_get_folios(inode->i_mapping, &index, end_index, &fbatch);
 		for (i = 0; i < ret; i++) {
 			struct folio *folio = fbatch.folios[i];
 

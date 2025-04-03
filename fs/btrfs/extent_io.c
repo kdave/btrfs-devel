@@ -207,8 +207,7 @@ static void __process_folios_contig(struct address_space *mapping,
 	while (index <= end_index) {
 		int found_folios;
 
-		found_folios = filemap_get_folios_contig(mapping, &index,
-				end_index, &fbatch);
+		found_folios = filemap_get_folios(mapping, &index, end_index, &fbatch);
 		for (i = 0; i < found_folios; i++) {
 			struct folio *folio = fbatch.folios[i];
 
@@ -245,8 +244,7 @@ static noinline int lock_delalloc_folios(struct inode *inode,
 	while (index <= end_index) {
 		unsigned int found_folios, i;
 
-		found_folios = filemap_get_folios_contig(mapping, &index,
-				end_index, &fbatch);
+		found_folios = filemap_get_folios(mapping, &index, end_index, &fbatch);
 		if (found_folios == 0)
 			goto out;
 
