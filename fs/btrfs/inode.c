@@ -1214,11 +1214,11 @@ u64 btrfs_get_extent_allocation_hint(struct btrfs_inode *inode, u64 start,
 			free_extent_map(em);
 			em = search_extent_mapping(em_tree, 0, 0);
 			if (em && em->disk_bytenr < EXTENT_MAP_LAST_BYTE)
-				alloc_hint = extent_map_block_start(em);
+				alloc_hint = btrfs_extent_map_block_start(em);
 			if (em)
 				free_extent_map(em);
 		} else {
-			alloc_hint = extent_map_block_start(em);
+			alloc_hint = btrfs_extent_map_block_start(em);
 			free_extent_map(em);
 		}
 	}
@@ -2678,7 +2678,7 @@ static int btrfs_find_new_delalloc_bytes(struct btrfs_inode *inode,
 					   search_start + em_len - 1,
 					   EXTENT_DELALLOC_NEW, cached_state);
 next:
-		search_start = extent_map_end(em);
+		search_start = btrfs_extent_map_end(em);
 		free_extent_map(em);
 		if (ret)
 			return ret;
@@ -5005,7 +5005,7 @@ int btrfs_cont_expand(struct btrfs_inode *inode, loff_t oldsize, loff_t size)
 			em = NULL;
 			break;
 		}
-		last_byte = min(extent_map_end(em), block_end);
+		last_byte = min(btrfs_extent_map_end(em), block_end);
 		last_byte = ALIGN(last_byte, fs_info->sectorsize);
 		hole_size = last_byte - cur_offset;
 
@@ -7015,7 +7015,7 @@ not_found:
 insert:
 	ret = 0;
 	btrfs_release_path(path);
-	if (em->start > start || extent_map_end(em) <= start) {
+	if (em->start > start || btrfs_extent_map_end(em) <= start) {
 		btrfs_err(fs_info,
 			  "bad extent! em: [%llu %llu] passed [%llu %llu]",
 			  em->start, em->len, start, len);
@@ -9414,7 +9414,7 @@ ssize_t btrfs_encoded_read(struct kiocb *iocb, struct iov_iter *iter,
 	 * We only want to return up to EOF even if the extent extends beyond
 	 * that.
 	 */
-	encoded->len = min_t(u64, extent_map_end(em),
+	encoded->len = min_t(u64, btrfs_extent_map_end(em),
 			     inode->vfs_inode.i_size) - iocb->ki_pos;
 	if (em->disk_bytenr == EXTENT_MAP_HOLE ||
 	    (em->flags & EXTENT_FLAG_PREALLOC)) {
@@ -9442,7 +9442,7 @@ ssize_t btrfs_encoded_read(struct kiocb *iocb, struct iov_iter *iter,
 			goto out_em;
 		encoded->compression = ret;
 	} else {
-		*disk_bytenr = extent_map_block_start(em) + (start - em->start);
+		*disk_bytenr = btrfs_extent_map_block_start(em) + (start - em->start);
 		if (encoded->len > count)
 			encoded->len = count;
 		/*
