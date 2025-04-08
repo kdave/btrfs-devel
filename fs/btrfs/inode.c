@@ -1203,7 +1203,7 @@ u64 btrfs_get_extent_allocation_hint(struct btrfs_inode *inode, u64 start,
 	u64 alloc_hint = 0;
 
 	read_lock(&em_tree->lock);
-	em = search_extent_mapping(em_tree, start, num_bytes);
+	em = btrfs_search_extent_mapping(em_tree, start, num_bytes);
 	if (em) {
 		/*
 		 * if block start isn't an actual block number then find the
@@ -1212,7 +1212,7 @@ u64 btrfs_get_extent_allocation_hint(struct btrfs_inode *inode, u64 start,
 		 */
 		if (em->disk_bytenr >= EXTENT_MAP_LAST_BYTE) {
 			btrfs_free_extent_map(em);
-			em = search_extent_mapping(em_tree, 0, 0);
+			em = btrfs_search_extent_mapping(em_tree, 0, 0);
 			if (em && em->disk_bytenr < EXTENT_MAP_LAST_BYTE)
 				alloc_hint = btrfs_extent_map_block_start(em);
 			if (em)
@@ -3185,8 +3185,8 @@ int btrfs_finish_one_ordered(struct btrfs_ordered_extent *ordered_extent)
 		goto out;
 	}
 
-	ret = unpin_extent_cache(inode, ordered_extent->file_offset,
-				 ordered_extent->num_bytes, trans->transid);
+	ret = btrfs_unpin_extent_cache(inode, ordered_extent->file_offset,
+				       ordered_extent->num_bytes, trans->transid);
 	if (ret < 0) {
 		btrfs_abort_transaction(trans, ret);
 		goto out;
@@ -6867,7 +6867,7 @@ struct extent_map *btrfs_get_extent(struct btrfs_inode *inode,
 	struct extent_map_tree *em_tree = &inode->extent_tree;
 
 	read_lock(&em_tree->lock);
-	em = lookup_extent_mapping(em_tree, start, len);
+	em = btrfs_lookup_extent_mapping(em_tree, start, len);
 	read_unlock(&em_tree->lock);
 
 	if (em) {
@@ -7732,7 +7732,7 @@ struct inode *btrfs_alloc_inode(struct super_block *sb)
 	ei->i_otime_nsec = 0;
 
 	inode = &ei->vfs_inode;
-	extent_map_tree_init(&ei->extent_tree);
+	btrfs_extent_map_tree_init(&ei->extent_tree);
 
 	/* This io tree sets the valid inode. */
 	btrfs_extent_io_tree_init(fs_info, &ei->io_tree, IO_TREE_INODE_IO);
