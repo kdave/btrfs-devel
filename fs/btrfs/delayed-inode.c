@@ -334,6 +334,20 @@ static struct btrfs_delayed_item *btrfs_alloc_delayed_item(u16 data_len,
 	return item;
 }
 
+static int btrfs_delayed_item_key_cmp(const void *k, const struct rb_node *node)
+{
+	const u64 *index = k;
+	const struct btrfs_delayed_item *delayed_item =
+		rb_entry(node, struct btrfs_delayed_item, rb_node);
+
+	if (delayed_item->index < *index)
+		return 1;
+	else if (delayed_item->index > *index)
+		return -1;
+
+	return 0;
+}
+
 /*
  * Look up the delayed item by key.
  *
@@ -347,21 +361,10 @@ static struct btrfs_delayed_item *__btrfs_lookup_delayed_item(
 				struct rb_root *root,
 				u64 index)
 {
-	struct rb_node *node = root->rb_node;
-	struct btrfs_delayed_item *delayed_item = NULL;
+	struct rb_node *node;
 
-	while (node) {
-		delayed_item = rb_entry(node, struct btrfs_delayed_item,
-					rb_node);
-		if (delayed_item->index < index)
-			node = node->rb_right;
-		else if (delayed_item->index > index)
-			node = node->rb_left;
-		else
-			return delayed_item;
-	}
-
-	return NULL;
+	node = rb_find(&index, root, btrfs_delayed_item_key_cmp);
+	return rb_entry_safe(node, struct btrfs_delayed_item, rb_node);
 }
 
 static int btrfs_delayed_item_cmp(const struct rb_node *new,
@@ -369,14 +372,8 @@ static int btrfs_delayed_item_cmp(const struct rb_node *new,
 {
 	const struct btrfs_delayed_item *new_item =
 		rb_entry(new, struct btrfs_delayed_item, rb_node);
-	const struct btrfs_delayed_item *exist_item =
-		rb_entry(exist, struct btrfs_delayed_item, rb_node);
 
-	if (new_item->index < exist_item->index)
-		return -1;
-	if (new_item->index > exist_item->index)
-		return 1;
-	return 0;
+	return btrfs_delayed_item_key_cmp(&new_item->index, exist);
 }
 
 static int __btrfs_add_delayed_item(struct btrfs_delayed_node *delayed_node,
