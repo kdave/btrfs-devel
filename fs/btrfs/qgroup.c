@@ -4685,6 +4685,14 @@ static int btrfs_qgroup_swapped_block_key_cmp(const void *k, const struct rb_nod
 	return 0;
 }
 
+static int btrfs_qgroup_swapped_block_cmp(struct rb_node *new, const struct rb_node *exist)
+{
+	const struct btrfs_qgroup_swapped_block *new_block =
+		rb_entry(new, struct btrfs_qgroup_swapped_block, node);
+
+	return btrfs_qgroup_swapped_block_key_cmp(&new_block->subvol_bytenr, exist);
+}
+
 /*
  * Add subtree roots record into @subvol_root.
  *
@@ -4704,8 +4712,7 @@ int btrfs_qgroup_add_swapped_blocks(struct btrfs_root *subvol_root,
 	struct btrfs_fs_info *fs_info = subvol_root->fs_info;
 	struct btrfs_qgroup_swapped_blocks *blocks = &subvol_root->swapped_blocks;
 	struct btrfs_qgroup_swapped_block *block;
-	struct rb_node **cur;
-	struct rb_node *parent = NULL;
+	struct rb_node *exist;
 	int level = btrfs_header_level(subvol_parent) - 1;
 	int ret = 0;
 
@@ -4754,40 +4761,31 @@ int btrfs_qgroup_add_swapped_blocks(struct btrfs_root *subvol_root,
 
 	/* Insert @block into @blocks */
 	spin_lock(&blocks->lock);
-	cur = &blocks->blocks[level].rb_node;
-	while (*cur) {
+	exist = rb_find_add(&block->node, &blocks->blocks[level],
+				btrfs_qgroup_swapped_block_cmp);
+	if (exist) {
 		struct btrfs_qgroup_swapped_block *entry;
 
-		parent = *cur;
-		entry = rb_entry(parent, struct btrfs_qgroup_swapped_block,
+		entry = rb_entry(exist, struct btrfs_qgroup_swapped_block,
 				 node);
-
-		if (entry->subvol_bytenr < block->subvol_bytenr) {
-			cur = &(*cur)->rb_left;
-		} else if (entry->subvol_bytenr > block->subvol_bytenr) {
-			cur = &(*cur)->rb_right;
-		} else {
-			if (entry->subvol_generation !=
-					block->subvol_generation ||
-			    entry->reloc_bytenr != block->reloc_bytenr ||
-			    entry->reloc_generation !=
-					block->reloc_generation) {
-				/*
-				 * Duplicated but mismatch entry found.
-				 * Shouldn't happen.
-				 *
-				 * Marking qgroup inconsistent should be enough
-				 * for end users.
-				 */
-				DEBUG_WARN("duplicated but mismatched entry found");
-				ret = -EEXIST;
-			}
-			kfree(block);
-			goto out_unlock;
+		if (entry->subvol_generation !=
+				block->subvol_generation ||
+		    entry->reloc_bytenr != block->reloc_bytenr ||
+		    entry->reloc_generation !=
+				block->reloc_generation) {
+			/*
+			 * Duplicated but mismatch entry found.
+			 * Shouldn't happen.
+			 *
+			 * Marking qgroup inconsistent should be enough
+			 * for end users.
+			 */
+			DEBUG_WARN("duplicated but mismatched entry found");
+			ret = -EEXIST;
 		}
+		kfree(block);
+		goto out_unlock;
 	}
-	rb_link_node(&block->node, parent, cur);
-	rb_insert_color(&block->node, &blocks->blocks[level]);
 	blocks->swapped = true;
 out_unlock:
 	spin_unlock(&blocks->lock);
