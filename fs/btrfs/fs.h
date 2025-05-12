@@ -781,8 +781,9 @@ struct btrfs_fs_info {
 
 	struct btrfs_delayed_root *delayed_root;
 
-	/* Entries are eb->start / sectorsize */
+	/* Entries are eb->start >> node_bits */
 	struct xarray buffer_tree;
+	int node_bits;
 
 	/* Next backup root to be overwritten */
 	int backup_root_index;
