@@ -4316,7 +4316,6 @@ static int try_release_subpage_extent_buffer(struct folio *folio)
 			spin_unlock(&eb->refs_lock);
 			continue;
 		}
-		xa_unlock_irq(&fs_info->buffer_tree);
 
 		/*
 		 * If tree ref isn't set then we know the ref on this eb is a
@@ -4333,6 +4332,7 @@ static int try_release_subpage_extent_buffer(struct folio *folio)
 		 * check the folio private at the end.  And
 		 * release_extent_buffer() will release the refs_lock.
 		 */
+		xa_unlock_irq(&fs_info->buffer_tree);
 		release_extent_buffer(eb);
 		xa_lock_irq(&fs_info->buffer_tree);
 	}
