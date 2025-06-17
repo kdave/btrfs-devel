@@ -1842,7 +1842,6 @@ static int btrfs_get_tree_super(struct fs_context *fc)
 	struct btrfs_fs_info *fs_info = fc->s_fs_info;
 	struct btrfs_fs_context *ctx = fc->fs_private;
 	struct btrfs_fs_devices *fs_devices = NULL;
-	struct block_device *bdev;
 	struct btrfs_device *device;
 	struct super_block *sb;
 	blk_mode_t mode = btrfs_open_mode(fc);
@@ -1865,19 +1864,11 @@ static int btrfs_get_tree_super(struct fs_context *fc)
 	fs_devices = device->fs_devices;
 	fs_info->fs_devices = fs_devices;
 
-	ret = btrfs_open_devices(fs_devices, mode, &btrfs_fs_type);
-	mutex_unlock(&uuid_mutex);
-	if (ret)
-		return ret;
-
-	if (!(fc->sb_flags & SB_RDONLY) && fs_devices->rw_devices == 0)
-		return -EACCES;
-
-	bdev = fs_devices->latest_dev->bdev;
-
 	sb = sget_fc(fc, btrfs_fc_test_super, set_anon_super_fc);
-	if (IS_ERR(sb))
+	if (IS_ERR(sb)) {
+		mutex_unlock(&uuid_mutex);
 		return PTR_ERR(sb);
+	}
 
 	set_device_specific_options(fs_info);
 
@@ -1889,11 +1880,15 @@ static int btrfs_get_tree_super(struct fs_context *fc)
 		 *
 		 * fc->s_fs_info is not touched and will be later freed by
 		 * put_fs_context() through btrfs_free_fs_context().
-		 *
-		 * And the fs_info->fs_devices will also be closed by
-		 * btrfs_free_fs_context().
 		 */
 		ASSERT(fc->s_fs_info == fs_info);
+
+		/*
+		 * But the fs_info->fs_devices is not opened, we should not let
+		 * btrfs_free_fs_context() to close them.
+		 */
+		fs_info->fs_devices = NULL;
+		mutex_unlock(&uuid_mutex);
 
 		/*
 		 * At this stage we may have RO flag mismatch between
@@ -1902,6 +1897,8 @@ static int btrfs_get_tree_super(struct fs_context *fc)
 		 * needed.
 		 */
 	} else {
+		struct block_device *bdev;
+
 		/*
 		 * The first mount of the fs thus a new superblock, fc->s_fs_info
 		 * should be NULL, and the owner ship of our fs_info and fs_devices is
@@ -1909,6 +1906,17 @@ static int btrfs_get_tree_super(struct fs_context *fc)
 		 */
 		ASSERT(fc->s_fs_info == NULL);
 
+		ret = btrfs_open_devices(fs_devices, mode, &btrfs_fs_type);
+		mutex_unlock(&uuid_mutex);
+		if (ret < 0) {
+			deactivate_locked_super(sb);
+			return ret;
+		}
+		if (!(fc->sb_flags & SB_RDONLY) && fs_devices->rw_devices == 0) {
+			deactivate_locked_super(sb);
+			return -EACCES;
+		}
+		bdev = fs_devices->latest_dev->bdev;
 		snprintf(sb->s_id, sizeof(sb->s_id), "%pg", bdev);
 		shrinker_debugfs_rename(sb->s_shrink, "sb-btrfs:%s", sb->s_id);
 		btrfs_sb(sb)->bdev_holder = &btrfs_fs_type;
