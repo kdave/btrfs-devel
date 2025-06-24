@@ -3810,22 +3810,6 @@ static int do_allocation_clustered(struct btrfs_block_group *block_group,
 }
 
 /*
- * Tree-log block group locking
- * ============================
- *
- * fs_info::treelog_bg_lock protects the fs_info::treelog_bg which
- * indicates the starting address of a block group, which is reserved only
- * for tree-log metadata.
- *
- * Lock nesting
- * ============
- *
- * space_info::lock
- *   block_group::lock
- *     fs_info::treelog_bg_lock
- */
-
-/*
  * Simple allocator for sequential-only block group. It only allows sequential
  * allocation. No need to play with trees. This function also reserves the
  * bytes as in btrfs_add_reserved_bytes.
@@ -3841,9 +3825,7 @@ static int do_allocation_zoned(struct btrfs_block_group *block_group,
 	u64 num_bytes = ffe_ctl->num_bytes;
 	u64 avail;
 	u64 bytenr = block_group->start;
-	u64 log_bytenr;
 	int ret = 0;
-	bool skip = false;
 
 	ASSERT(btrfs_is_zoned(block_group->fs_info));
 
@@ -3851,13 +3833,9 @@ static int do_allocation_zoned(struct btrfs_block_group *block_group,
 	 * Do not allow non-tree-log blocks in the dedicated tree-log block
 	 * group, and vice versa.
 	 */
-	spin_lock(&fs_info->treelog_bg_lock);
-	log_bytenr = fs_info->treelog_bg;
-	if (log_bytenr && ((ffe_ctl->for_treelog && bytenr != log_bytenr) ||
-			   (!ffe_ctl->for_treelog && bytenr == log_bytenr)))
-		skip = true;
-	spin_unlock(&fs_info->treelog_bg_lock);
-	if (skip)
+	if (READ_ONCE(fs_info->treelog_bg) &&
+	    ((ffe_ctl->for_treelog && bytenr != READ_ONCE(fs_info->treelog_bg)) ||
+	     (!ffe_ctl->for_treelog && bytenr == READ_ONCE(fs_info->treelog_bg))))
 		return 1;
 
 	/*
@@ -3892,14 +3870,13 @@ static int do_allocation_zoned(struct btrfs_block_group *block_group,
 
 	spin_lock(&space_info->lock);
 	spin_lock(&block_group->lock);
-	spin_lock(&fs_info->treelog_bg_lock);
 
 	if (ret)
 		goto out;
 
 	ASSERT(!ffe_ctl->for_treelog ||
-	       block_group->start == fs_info->treelog_bg ||
-	       fs_info->treelog_bg == 0);
+	       block_group->start == READ_ONCE(fs_info->treelog_bg) ||
+	       READ_ONCE(fs_info->treelog_bg) == 0);
 	ASSERT(!ffe_ctl->for_data_reloc ||
 	       block_group->start == READ_ONCE(fs_info->data_reloc_bg) ||
 	       READ_ONCE(fs_info->data_reloc_bg) == 0);
@@ -3915,7 +3892,7 @@ static int do_allocation_zoned(struct btrfs_block_group *block_group,
 	 * Do not allow currently using block group to be tree-log dedicated
 	 * block group.
 	 */
-	if (ffe_ctl->for_treelog && !fs_info->treelog_bg &&
+	if (ffe_ctl->for_treelog && READ_ONCE(fs_info->treelog_bg) == 0 &&
 	    (block_group->used || block_group->reserved)) {
 		ret = 1;
 		goto out;
@@ -3946,8 +3923,8 @@ static int do_allocation_zoned(struct btrfs_block_group *block_group,
 		goto out;
 	}
 
-	if (ffe_ctl->for_treelog && !fs_info->treelog_bg)
-		fs_info->treelog_bg = block_group->start;
+	if (ffe_ctl->for_treelog && READ_ONCE(fs_info->treelog_bg) == 0)
+		WRITE_ONCE(fs_info->treelog_bg, block_group->start);
 
 	if (ffe_ctl->for_data_reloc) {
 		if (READ_ONCE(fs_info->data_reloc_bg) == 0)
@@ -3985,10 +3962,9 @@ static int do_allocation_zoned(struct btrfs_block_group *block_group,
 
 out:
 	if (ret && ffe_ctl->for_treelog)
-		fs_info->treelog_bg = 0;
+		WRITE_ONCE(fs_info->treelog_bg, 0);
 	if (ret && ffe_ctl->for_data_reloc)
 		WRITE_ONCE(fs_info->data_reloc_bg, 0);
-	spin_unlock(&fs_info->treelog_bg_lock);
 	spin_unlock(&block_group->lock);
 	spin_unlock(&space_info->lock);
 	return ret;
@@ -4290,11 +4266,8 @@ static int prepare_allocation_clustered(struct btrfs_fs_info *fs_info,
 static int prepare_allocation_zoned(struct btrfs_fs_info *fs_info,
 				    struct find_free_extent_ctl *ffe_ctl)
 {
-	if (ffe_ctl->for_treelog) {
-		spin_lock(&fs_info->treelog_bg_lock);
-		if (fs_info->treelog_bg)
-			ffe_ctl->hint_byte = fs_info->treelog_bg;
-		spin_unlock(&fs_info->treelog_bg_lock);
+	if (ffe_ctl->for_treelog && READ_ONCE(fs_info->treelog_bg)) {
+			ffe_ctl->hint_byte = READ_ONCE(fs_info->treelog_bg);
 	} else if (ffe_ctl->for_data_reloc &&
 		   READ_ONCE(fs_info->data_reloc_bg)) {
 			ffe_ctl->hint_byte = READ_ONCE(fs_info->data_reloc_bg);

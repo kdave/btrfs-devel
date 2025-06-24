@@ -1947,7 +1947,7 @@ static bool check_bg_is_active(struct btrfs_eb_write_context *ctx,
 	if (test_bit(BLOCK_GROUP_FLAG_ZONE_IS_ACTIVE, &block_group->runtime_flags))
 		return true;
 
-	if (fs_info->treelog_bg == block_group->start) {
+	if (READ_ONCE(fs_info->treelog_bg) == block_group->start) {
 		if (!btrfs_zone_activate(block_group)) {
 			int ret_fin = btrfs_zone_finish_one_bg(fs_info);
 
