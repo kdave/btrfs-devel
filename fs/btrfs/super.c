@@ -1921,6 +1921,17 @@ static int btrfs_get_tree_super(struct fs_context *fc)
 		mutex_lock(&uuid_mutex);
 		btrfs_fs_devices_dec_holding(fs_devices);
 		ret = btrfs_open_devices(fs_devices, mode, sb);
+		/*
+		 * If btrfs_open_devices() failed, fs_devices is not opened and
+		 * can be freed by any reclaim request after uuid_mutex unlocked.
+		 *
+		 * But our fs_info is still using that fs_devices, thus it will
+		 * lead to use-after-free later.
+		 *
+		 * So here we must not use that fs_devices after open failure.
+		 */
+		if (ret < 0)
+			fs_info->fs_devices = NULL;
 		mutex_unlock(&uuid_mutex);
 		if (ret < 0) {
 			deactivate_locked_super(sb);
