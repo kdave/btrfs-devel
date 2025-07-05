@@ -23,8 +23,8 @@ static noinline int process_page_range(struct inode *inode, u64 start, u64 end,
 {
 	int ret;
 	struct folio_batch fbatch;
-	unsigned long index = start >> PAGE_SHIFT;
-	unsigned long end_index = end >> PAGE_SHIFT;
+	pgoff_t index = start >> PAGE_SHIFT;
+	pgoff_t end_index = end >> PAGE_SHIFT;
 	int i;
 	int count = 0;
 	int loops = 0;
@@ -75,7 +75,8 @@ static void extent_flag_to_str(const struct extent_state *state, char *dest)
 	dest[0] = 0;
 	PRINT_ONE_FLAG(state, dest, cur, DIRTY);
 	PRINT_ONE_FLAG(state, dest, cur, LOCKED);
-	PRINT_ONE_FLAG(state, dest, cur, NEW);
+	PRINT_ONE_FLAG(state, dest, cur, DIRTY_LOG1);
+	PRINT_ONE_FLAG(state, dest, cur, DIRTY_LOG2);
 	PRINT_ONE_FLAG(state, dest, cur, DELALLOC);
 	PRINT_ONE_FLAG(state, dest, cur, DEFRAG);
 	PRINT_ONE_FLAG(state, dest, cur, BOUNDARY);
@@ -113,7 +114,6 @@ static int test_find_delalloc(u32 sectorsize, u32 nodesize)
 	struct extent_io_tree *tmp;
 	struct page *page;
 	struct page *locked_page = NULL;
-	unsigned long index = 0;
 	/* In this test we need at least 2 file extents at its maximum size */
 	u64 max_bytes = BTRFS_MAX_EXTENT_SIZE;
 	u64 total_dirty = 2 * max_bytes;
@@ -156,7 +156,7 @@ static int test_find_delalloc(u32 sectorsize, u32 nodesize)
 	 * everything to make sure our pages don't get evicted and screw up our
 	 * test.
 	 */
-	for (index = 0; index < (total_dirty >> PAGE_SHIFT); index++) {
+	for (pgoff_t index = 0; index < (total_dirty >> PAGE_SHIFT); index++) {
 		page = find_or_create_page(inode->i_mapping, index, GFP_KERNEL);
 		if (!page) {
 			test_err("failed to allocate test page");
@@ -343,11 +343,11 @@ static int check_eb_bitmap(unsigned long *bitmap, struct extent_buffer *eb)
 	unsigned long i;
 
 	for (i = 0; i < eb->len * BITS_PER_BYTE; i++) {
-		int bit, bit1;
+		bool bit_set, bit1_set;
 
-		bit = !!test_bit(i, bitmap);
-		bit1 = !!extent_buffer_test_bit(eb, 0, i);
-		if (bit1 != bit) {
+		bit_set = test_bit(i, bitmap);
+		bit1_set = extent_buffer_test_bit(eb, 0, i);
+		if (bit1_set != bit_set) {
 			u8 has;
 			u8 expect;
 
@@ -360,9 +360,9 @@ static int check_eb_bitmap(unsigned long *bitmap, struct extent_buffer *eb)
 			return -EINVAL;
 		}
 
-		bit1 = !!extent_buffer_test_bit(eb, i / BITS_PER_BYTE,
-						i % BITS_PER_BYTE);
-		if (bit1 != bit) {
+		bit1_set = extent_buffer_test_bit(eb, i / BITS_PER_BYTE,
+						  i % BITS_PER_BYTE);
+		if (bit1_set != bit_set) {
 			u8 has;
 			u8 expect;
 
