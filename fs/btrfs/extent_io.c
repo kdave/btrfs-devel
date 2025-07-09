@@ -101,6 +101,16 @@ struct btrfs_bio_ctrl {
 	enum btrfs_compression_type compress_type;
 	u32 len_to_oe_boundary;
 	blk_opf_t opf;
+	/*
+	 * For data read bios, we attempt to optimize csum lookups if the extent
+	 * generation is older than the current one. To make this possible, we
+	 * need to track the maximum generation of an extent in a bio_ctrl to
+	 * make the decision when submitting the bio.
+	 *
+	 * See the comment in btrfs_lookup_bio_sums for more detail on the
+	 * need for this optimization.
+	 */
+	u64 generation;
 	btrfs_bio_end_io_t end_io_func;
 	struct writeback_control *wbc;
 
@@ -113,6 +123,28 @@ struct btrfs_bio_ctrl {
 	struct readahead_control *ractl;
 };
 
+/*
+ * Helper to set the csum search commit root option for a bio_ctrl's bbio
+ * before submitting the bio.
+ *
+ * Only for use by submit_one_bio().
+ */
+static void bio_set_csum_search_commit_root(struct btrfs_bio_ctrl *bio_ctrl)
+{
+	struct btrfs_bio *bbio = bio_ctrl->bbio;
+
+	ASSERT(bbio);
+
+	if (!(btrfs_op(&bbio->bio) == BTRFS_MAP_READ && is_data_inode(bbio->inode)))
+		return;
+
+	if (bio_ctrl->generation &&
+	    bio_ctrl->generation < btrfs_get_fs_generation(bbio->inode->root->fs_info))
+		btrfs_bio_set_csum_search_commit_root(bio_ctrl->bbio);
+	else
+		btrfs_bio_clear_csum_search_commit_root(bio_ctrl->bbio);
+}
+
 static void submit_one_bio(struct btrfs_bio_ctrl *bio_ctrl)
 {
 	struct btrfs_bio *bbio = bio_ctrl->bbio;
@@ -123,6 +155,8 @@ static void submit_one_bio(struct btrfs_bio_ctrl *bio_ctrl)
 	/* Caller should ensure the bio has at least some range added */
 	ASSERT(bbio->bio.bi_iter.bi_size);
 
+	bio_set_csum_search_commit_root(bio_ctrl);
+
 	if (btrfs_op(&bbio->bio) == BTRFS_MAP_READ &&
 	    bio_ctrl->compress_type != BTRFS_COMPRESS_NONE)
 		btrfs_submit_compressed_read(bbio);
@@ -131,6 +165,8 @@ static void submit_one_bio(struct btrfs_bio_ctrl *bio_ctrl)
 
 	/* The bbio is owned by the end_io handler now */
 	bio_ctrl->bbio = NULL;
+	/* Reset the generation for the next bio */
+	bio_ctrl->generation = 0;
 }
 
 /*
@@ -1025,6 +1061,8 @@ static int btrfs_do_readpage(struct folio *folio, struct extent_map **em_cached,
 
 		if (prev_em_start)
 			*prev_em_start = em->start;
+
+		bio_ctrl->generation = max(bio_ctrl->generation, em->generation);
 
 		btrfs_free_extent_map(em);
 		em = NULL;

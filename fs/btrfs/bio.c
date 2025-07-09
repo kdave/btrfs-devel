@@ -93,6 +93,8 @@ static struct btrfs_bio *btrfs_split_bio(struct btrfs_fs_info *fs_info,
 		refcount_inc(&orig_bbio->ordered->refs);
 		bbio->ordered = orig_bbio->ordered;
 	}
+	if (btrfs_bio_csum_search_commit_root(orig_bbio))
+		btrfs_bio_set_csum_search_commit_root(bbio);
 	atomic_inc(&orig_bbio->pending_ios);
 	return bbio;
 }
@@ -479,6 +481,14 @@ static void btrfs_submit_mirrored_bio(struct btrfs_io_context *bioc, int dev_nr)
 static void btrfs_submit_bio(struct bio *bio, struct btrfs_io_context *bioc,
 			     struct btrfs_io_stripe *smap, int mirror_num)
 {
+	/*
+	 * It is important to clear the bits we used in bio->bi_flags.
+	 * Because bio->bi_flags belongs to the block layer, we should
+	 * avoid leaving stray bits set when we transfer ownership of
+	 * the bio by submitting it.
+	 */
+	btrfs_bio_clear_csum_search_commit_root(btrfs_bio(bio));
+
 	if (!bioc) {
 		/* Single mirror read/write fast path. */
 		btrfs_bio(bio)->mirror_num = mirror_num;

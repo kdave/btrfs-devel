@@ -602,6 +602,8 @@ void btrfs_submit_compressed_read(struct btrfs_bio *bbio)
 	cb->compressed_len = compressed_len;
 	cb->compress_type = btrfs_extent_map_compression(em);
 	cb->orig_bbio = bbio;
+	if (btrfs_bio_csum_search_commit_root(bbio))
+		btrfs_bio_set_csum_search_commit_root(&cb->bbio);
 
 	btrfs_free_extent_map(em);
 
