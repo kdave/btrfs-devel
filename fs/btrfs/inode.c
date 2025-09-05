@@ -3909,10 +3909,6 @@ static int btrfs_read_locked_inode(struct btrfs_inode *inode, struct btrfs_path 
 	bool filled = false;
 	int first_xattr_slot;
 
-	ret = btrfs_init_file_extent_tree(inode);
-	if (ret)
-		goto out;
-
 	ret = btrfs_fill_inode(inode, &rdev);
 	if (!ret)
 		filled = true;
@@ -3943,6 +3939,11 @@ static int btrfs_read_locked_inode(struct btrfs_inode *inode, struct btrfs_path 
 	set_nlink(vfs_inode, btrfs_inode_nlink(leaf, inode_item));
 	i_uid_write(vfs_inode, btrfs_inode_uid(leaf, inode_item));
 	i_gid_write(vfs_inode, btrfs_inode_gid(leaf, inode_item));
+
+	ret = btrfs_init_file_extent_tree(inode);
+	if (ret)
+		goto out;
+
 	btrfs_i_size_write(inode, btrfs_inode_size(leaf, inode_item));
 	btrfs_inode_set_file_extent_range(inode, 0,
 			round_up(i_size_read(vfs_inode), fs_info->sectorsize));
