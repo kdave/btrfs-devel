@@ -9822,8 +9822,6 @@ ssize_t btrfs_do_encoded_write(struct kiocb *iocb, struct iov_iter *from,
 	}
 
 	for (;;) {
-		struct btrfs_ordered_extent *ordered;
-
 		ret = btrfs_wait_ordered_range(inode, start, num_bytes);
 		if (ret)
 			goto out_folios;
