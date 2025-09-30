@@ -109,7 +109,7 @@ static int drop_verity_items(struct btrfs_inode *inode, u8 key_type)
 {
 	struct btrfs_trans_handle *trans;
 	struct btrfs_root *root = inode->root;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_key key;
 	int count = 0;
 	int ret;
@@ -170,7 +170,6 @@ static int drop_verity_items(struct btrfs_inode *inode, u8 key_type)
 	ret = count;
 	btrfs_end_transaction(trans);
 out:
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -217,7 +216,7 @@ static int write_key_bytes(struct btrfs_inode *inode, u8 key_type, u64 offset,
 			   const char *src, u64 len)
 {
 	struct btrfs_trans_handle *trans;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_root *root = inode->root;
 	struct extent_buffer *leaf;
 	struct btrfs_key key;
@@ -267,7 +266,6 @@ static int write_key_bytes(struct btrfs_inode *inode, u8 key_type, u64 offset,
 		btrfs_end_transaction(trans);
 	}
 
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -296,7 +294,7 @@ static int write_key_bytes(struct btrfs_inode *inode, u8 key_type, u64 offset,
 static int read_key_bytes(struct btrfs_inode *inode, u8 key_type, u64 offset,
 			  char *dest, u64 len, struct folio *dest_folio)
 {
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_root *root = inode->root;
 	struct extent_buffer *leaf;
 	struct btrfs_key key;
@@ -404,7 +402,6 @@ static int read_key_bytes(struct btrfs_inode *inode, u8 key_type, u64 offset,
 		}
 	}
 out:
-	btrfs_free_path(path);
 	if (!ret)
 		ret = copied;
 	return ret;

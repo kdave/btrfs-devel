@@ -1681,7 +1681,7 @@ static int find_free_dev_extent(struct btrfs_device *device, u64 num_bytes,
 	struct btrfs_root *root = fs_info->dev_root;
 	struct btrfs_key key;
 	struct btrfs_dev_extent *dev_extent;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	u64 search_start;
 	u64 hole_size;
 	u64 max_hole_start;
@@ -1812,7 +1812,6 @@ next:
 	       "max_hole_start=%llu max_hole_size=%llu search_end=%llu",
 	       max_hole_start, max_hole_size, search_end);
 out:
-	btrfs_free_path(path);
 	*start = max_hole_start;
 	if (len)
 		*len = max_hole_size;
@@ -1826,7 +1825,7 @@ static int btrfs_free_dev_extent(struct btrfs_trans_handle *trans,
 	struct btrfs_fs_info *fs_info = device->fs_info;
 	struct btrfs_root *root = fs_info->dev_root;
 	int ret;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_key key;
 	struct btrfs_key found_key;
 	struct extent_buffer *leaf = NULL;
@@ -1869,7 +1868,6 @@ again:
 	if (ret == 0)
 		set_bit(BTRFS_TRANS_HAVE_FREE_BGS, &trans->transaction->flags);
 out:
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -1897,7 +1895,7 @@ static noinline int find_next_devid(struct btrfs_fs_info *fs_info,
 	int ret;
 	struct btrfs_key key;
 	struct btrfs_key found_key;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 
 	path = btrfs_alloc_path();
 	if (!path)
@@ -1930,7 +1928,6 @@ static noinline int find_next_devid(struct btrfs_fs_info *fs_info,
 	}
 	ret = 0;
 error:
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -1942,7 +1939,7 @@ static int btrfs_add_dev_item(struct btrfs_trans_handle *trans,
 			    struct btrfs_device *device)
 {
 	int ret;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_dev_item *dev_item;
 	struct extent_buffer *leaf;
 	struct btrfs_key key;
@@ -1989,7 +1986,6 @@ static int btrfs_add_dev_item(struct btrfs_trans_handle *trans,
 
 	ret = 0;
 out:
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -2017,7 +2013,7 @@ static int btrfs_rm_dev_item(struct btrfs_trans_handle *trans,
 {
 	struct btrfs_root *root = device->fs_info->chunk_root;
 	int ret;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_key key;
 
 	path = btrfs_alloc_path();
@@ -2039,7 +2035,6 @@ static int btrfs_rm_dev_item(struct btrfs_trans_handle *trans,
 
 	ret = btrfs_del_item(trans, root, path);
 out:
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -2626,7 +2621,7 @@ static int btrfs_finish_sprout(struct btrfs_trans_handle *trans)
 	BTRFS_DEV_LOOKUP_ARGS(args);
 	struct btrfs_fs_info *fs_info = trans->fs_info;
 	struct btrfs_root *root = fs_info->chunk_root;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct extent_buffer *leaf;
 	struct btrfs_dev_item *dev_item;
 	struct btrfs_device *device;
@@ -2690,7 +2685,6 @@ next_slot:
 	}
 	ret = 0;
 error:
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -2946,7 +2940,7 @@ static noinline int btrfs_update_device(struct btrfs_trans_handle *trans,
 					struct btrfs_device *device)
 {
 	int ret;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_root *root = device->fs_info->chunk_root;
 	struct btrfs_dev_item *dev_item;
 	struct extent_buffer *leaf;
@@ -2982,7 +2976,6 @@ static noinline int btrfs_update_device(struct btrfs_trans_handle *trans,
 	btrfs_set_device_bytes_used(leaf, dev_item,
 				    btrfs_device_get_bytes_used(device));
 out:
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -3035,7 +3028,7 @@ static int btrfs_free_chunk(struct btrfs_trans_handle *trans, u64 chunk_offset)
 	struct btrfs_fs_info *fs_info = trans->fs_info;
 	struct btrfs_root *root = fs_info->chunk_root;
 	int ret;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_key key;
 
 	path = btrfs_alloc_path();
@@ -3064,7 +3057,6 @@ static int btrfs_free_chunk(struct btrfs_trans_handle *trans, u64 chunk_offset)
 		goto out;
 	}
 out:
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -3501,7 +3493,7 @@ int btrfs_relocate_chunk(struct btrfs_fs_info *fs_info, u64 chunk_offset,
 static int btrfs_relocate_sys_chunks(struct btrfs_fs_info *fs_info)
 {
 	struct btrfs_root *chunk_root = fs_info->chunk_root;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct extent_buffer *leaf;
 	struct btrfs_chunk *chunk;
 	struct btrfs_key key;
@@ -3580,7 +3572,6 @@ again:
 		ret = -ENOSPC;
 	}
 error:
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -4709,7 +4700,7 @@ int btrfs_recover_balance(struct btrfs_fs_info *fs_info)
 	struct btrfs_balance_control *bctl;
 	struct btrfs_balance_item *item;
 	struct btrfs_disk_balance_args disk_bargs;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct extent_buffer *leaf;
 	struct btrfs_key key;
 	int ret;
@@ -4772,7 +4763,6 @@ int btrfs_recover_balance(struct btrfs_fs_info *fs_info)
 	spin_unlock(&fs_info->balance_lock);
 	mutex_unlock(&fs_info->balance_mutex);
 out:
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -7450,7 +7440,7 @@ static void readahead_tree_node_children(struct extent_buffer *node)
 int btrfs_read_chunk_tree(struct btrfs_fs_info *fs_info)
 {
 	struct btrfs_root *root = fs_info->chunk_root;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct extent_buffer *leaf;
 	struct btrfs_key key;
 	struct btrfs_key found_key;
@@ -7567,8 +7557,6 @@ int btrfs_read_chunk_tree(struct btrfs_fs_info *fs_info)
 	ret = 0;
 error:
 	mutex_unlock(&uuid_mutex);
-
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -7668,7 +7656,7 @@ int btrfs_init_dev_stats(struct btrfs_fs_info *fs_info)
 {
 	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices, *seed_devs;
 	struct btrfs_device *device;
-	struct btrfs_path *path = NULL;
+	BTRFS_PATH_AUTO_FREE(path);
 	int ret = 0;
 
 	path = btrfs_alloc_path();
@@ -7690,8 +7678,6 @@ int btrfs_init_dev_stats(struct btrfs_fs_info *fs_info)
 	}
 out:
 	mutex_unlock(&fs_devices->device_list_mutex);
-
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -7700,7 +7686,7 @@ static int update_dev_stat_item(struct btrfs_trans_handle *trans,
 {
 	struct btrfs_fs_info *fs_info = trans->fs_info;
 	struct btrfs_root *dev_root = fs_info->dev_root;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_key key;
 	struct extent_buffer *eb;
 	struct btrfs_dev_stats_item *ptr;
@@ -7754,7 +7740,6 @@ static int update_dev_stat_item(struct btrfs_trans_handle *trans,
 		btrfs_set_dev_stats_value(eb, ptr, i,
 					  btrfs_dev_stat_read(device, i));
 out:
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -8044,7 +8029,7 @@ out:
  */
 int btrfs_verify_dev_extents(struct btrfs_fs_info *fs_info)
 {
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_root *root = fs_info->dev_root;
 	struct btrfs_key key;
 	u64 prev_devid = 0;
@@ -8134,7 +8119,6 @@ int btrfs_verify_dev_extents(struct btrfs_fs_info *fs_info)
 	/* Ensure all chunks have corresponding dev extents */
 	ret = verify_chunk_dev_extent_mapping(fs_info);
 out:
-	btrfs_free_path(path);
 	return ret;
 }
 
