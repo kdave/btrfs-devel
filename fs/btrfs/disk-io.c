@@ -3400,7 +3400,7 @@ int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_device
 	 * Handle the space caching options appropriately now that we have the
 	 * super block loaded and validated.
 	 */
-	btrfs_set_free_space_cache_settings(fs_info);
+	btrfs_set_free_space_cache_settings(fs_info, &fs_info->mount_opt);
 
 	if (!btrfs_check_options(fs_info, &fs_info->mount_opt, sb->s_flags)) {
 		ret = -EINVAL;
