@@ -58,6 +58,7 @@ struct btrfs_bio {
 			struct btrfs_ordered_sum *sums;
 			struct work_struct csum_work;
 			struct completion csum_done;
+			struct bio *csum_bio;
 			struct bvec_iter csum_saved_iter;
 			u64 orig_physical;
 		};

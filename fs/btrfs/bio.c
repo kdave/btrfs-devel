@@ -581,9 +581,9 @@ static int btrfs_bio_csum(struct btrfs_bio *bbio)
 	if (bbio->bio.bi_opf & REQ_META)
 		return btree_csum_one_bio(bbio);
 #ifdef CONFIG_BTRFS_EXPERIMENTAL
-	return btrfs_csum_one_bio(bbio, true);
+	return btrfs_csum_one_bio(bbio, &bbio->bio, true);
 #else
-	return btrfs_csum_one_bio(bbio, false);
+	return btrfs_csum_one_bio(bbio, &bbio->bio, false);
 #endif
 }
 
