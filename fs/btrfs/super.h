@@ -16,7 +16,8 @@ bool btrfs_check_options(const struct btrfs_fs_info *info,
 int btrfs_sync_fs(struct super_block *sb, int wait);
 char *btrfs_get_subvol_name_from_objectid(struct btrfs_fs_info *fs_info,
 					  u64 subvol_objectid);
-void btrfs_set_free_space_cache_settings(struct btrfs_fs_info *fs_info);
+void btrfs_set_free_space_cache_settings(struct btrfs_fs_info *fs_info,
+					 unsigned long long *mount_opt);
 
 static inline struct btrfs_fs_info *btrfs_sb(struct super_block *sb)
 {
