@@ -1435,8 +1435,8 @@ static noinline void unlock_up(struct btrfs_path *path, int level,
 		}
 
 		if (i >= lowest_unlock && i > skip_level) {
-			check_skip = false;
 			btrfs_tree_unlock_rw(path->nodes[i], path->locks[i]);
+			check_skip = false;
 			path->locks[i] = 0;
 			if (write_lock_level &&
 			    i > min_write_lock_level &&
@@ -1709,9 +1709,9 @@ static struct extent_buffer *btrfs_search_slot_get_root(struct btrfs_root *root,
 		level = btrfs_header_level(b);
 		/*
 		 * Ensure that all callers have set skip_locking when
-		 * p->search_commit_root = 1.
+		 * p->search_commit_root is true.
 		 */
-		ASSERT(p->skip_locking == 1);
+		ASSERT(p->skip_locking);
 
 		goto out;
 	}
@@ -2599,12 +2599,11 @@ void btrfs_set_item_key_safe(struct btrfs_trans_handle *trans,
 		if (unlikely(btrfs_comp_keys(&disk_key, new_key) >= 0)) {
 			btrfs_print_leaf(eb);
 			btrfs_crit(fs_info,
-		"slot %u key (%llu %u %llu) new key (%llu %u %llu)",
+		"slot %u key " BTRFS_KEY_FMT " new key " BTRFS_KEY_FMT,
 				   slot, btrfs_disk_key_objectid(&disk_key),
 				   btrfs_disk_key_type(&disk_key),
 				   btrfs_disk_key_offset(&disk_key),
-				   new_key->objectid, new_key->type,
-				   new_key->offset);
+				   BTRFS_KEY_FMT_VALUE(new_key));
 			BUG();
 		}
 	}
@@ -2613,12 +2612,11 @@ void btrfs_set_item_key_safe(struct btrfs_trans_handle *trans,
 		if (unlikely(btrfs_comp_keys(&disk_key, new_key) <= 0)) {
 			btrfs_print_leaf(eb);
 			btrfs_crit(fs_info,
-		"slot %u key (%llu %u %llu) new key (%llu %u %llu)",
+		"slot %u key " BTRFS_KEY_FMT " new key " BTRFS_KEY_FMT,
 				   slot, btrfs_disk_key_objectid(&disk_key),
 				   btrfs_disk_key_type(&disk_key),
 				   btrfs_disk_key_offset(&disk_key),
-				   new_key->objectid, new_key->type,
-				   new_key->offset);
+				   BTRFS_KEY_FMT_VALUE(new_key));
 			BUG();
 		}
 	}
@@ -2677,10 +2675,9 @@ static bool check_sibling_keys(const struct extent_buffer *left,
 		btrfs_crit(left->fs_info, "right extent buffer:");
 		btrfs_print_tree(right, false);
 		btrfs_crit(left->fs_info,
-"bad key order, sibling blocks, left last (%llu %u %llu) right first (%llu %u %llu)",
-			   left_last.objectid, left_last.type,
-			   left_last.offset, right_first.objectid,
-			   right_first.type, right_first.offset);
+"bad key order, sibling blocks, left last " BTRFS_KEY_FMT " right first " BTRFS_KEY_FMT,
+			   BTRFS_KEY_FMT_VALUE(&left_last),
+			   BTRFS_KEY_FMT_VALUE(&right_first));
 		return true;
 	}
 	return false;
@@ -3217,10 +3214,8 @@ static noinline int __push_leaf_right(struct btrfs_trans_handle *trans,
 	/* then fixup the leaf pointer in the path */
 	if (path->slots[0] >= left_nritems) {
 		path->slots[0] -= left_nritems;
-		if (btrfs_header_nritems(path->nodes[0]) == 0)
-			btrfs_clear_buffer_dirty(trans, path->nodes[0]);
-		btrfs_tree_unlock(path->nodes[0]);
-		free_extent_buffer(path->nodes[0]);
+		btrfs_tree_unlock(left);
+		free_extent_buffer(left);
 		path->nodes[0] = right;
 		path->slots[1] += 1;
 	} else {
@@ -3398,9 +3393,13 @@ static noinline int __push_leaf_left(struct btrfs_trans_handle *trans,
 	btrfs_set_header_nritems(left, old_left_nritems + push_items);
 
 	/* fixup right node */
-	if (push_items > right_nritems)
-		WARN(1, KERN_CRIT "push items %d nr %u\n", push_items,
-		       right_nritems);
+	if (unlikely(push_items > right_nritems)) {
+		ret = -EUCLEAN;
+		btrfs_abort_transaction(trans, ret);
+		btrfs_crit(fs_info, "push items (%d) > right leaf items (%u)",
+			   push_items, right_nritems);
+		goto out;
+	}
 
 	if (push_items < right_nritems) {
 		push_space = btrfs_item_offset(right, push_items - 1) -
@@ -3433,8 +3432,8 @@ static noinline int __push_leaf_left(struct btrfs_trans_handle *trans,
 	/* then fixup the leaf pointer in the path */
 	if (path->slots[0] < push_items) {
 		path->slots[0] += old_left_nritems;
-		btrfs_tree_unlock(path->nodes[0]);
-		free_extent_buffer(path->nodes[0]);
+		btrfs_tree_unlock(right);
+		free_extent_buffer(right);
 		path->nodes[0] = left;
 		path->slots[1] -= 1;
 	} else {
@@ -3861,10 +3860,10 @@ static noinline int setup_leaf_for_split(struct btrfs_trans_handle *trans,
 	}
 	btrfs_release_path(path);
 
-	path->keep_locks = 1;
-	path->search_for_split = 1;
+	path->keep_locks = true;
+	path->search_for_split = true;
 	ret = btrfs_search_slot(trans, root, &key, path, 0, 1);
-	path->search_for_split = 0;
+	path->search_for_split = false;
 	if (ret > 0)
 		ret = -EAGAIN;
 	if (ret < 0)
@@ -3891,11 +3890,11 @@ static noinline int setup_leaf_for_split(struct btrfs_trans_handle *trans,
 	if (ret)
 		goto err;
 
-	path->keep_locks = 0;
+	path->keep_locks = false;
 	btrfs_unlock_up_safe(path, 1);
 	return 0;
 err:
-	path->keep_locks = 0;
+	path->keep_locks = false;
 	return ret;
 }
 
@@ -4109,7 +4108,7 @@ void btrfs_extend_item(struct btrfs_trans_handle *trans,
 	nritems = btrfs_header_nritems(leaf);
 	data_end = leaf_data_end(leaf);
 
-	if (btrfs_leaf_free_space(leaf) < data_size) {
+	if (unlikely(btrfs_leaf_free_space(leaf) < data_size)) {
 		btrfs_print_leaf(leaf);
 		BUG();
 	}
@@ -4139,7 +4138,6 @@ void btrfs_extend_item(struct btrfs_trans_handle *trans,
 	memmove_leaf_data(leaf, data_end - data_size, data_end,
 			  old_data - data_end);
 
-	data_end = old_data;
 	old_size = btrfs_item_size(leaf, slot);
 	btrfs_set_item_size(leaf, slot, old_size + data_size);
 	btrfs_mark_buffer_dirty(trans, leaf);
@@ -4566,10 +4564,9 @@ int btrfs_del_items(struct btrfs_trans_handle *trans, struct btrfs_root *root,
 			if (btrfs_header_nritems(leaf) == 0) {
 				path->slots[1] = slot;
 				ret = btrfs_del_leaf(trans, root, path, leaf);
+				free_extent_buffer(leaf);
 				if (ret < 0)
 					return ret;
-				free_extent_buffer(leaf);
-				ret = 0;
 			} else {
 				/* if we're still in the path, make sure
 				 * we're dirty.  Otherwise, one of the
@@ -4613,11 +4610,11 @@ int btrfs_search_forward(struct btrfs_root *root, struct btrfs_key *min_key,
 	u32 nritems;
 	int level;
 	int ret = 1;
-	int keep_locks = path->keep_locks;
+	const bool keep_locks = path->keep_locks;
 
 	ASSERT(!path->nowait);
 	ASSERT(path->lowest_level == 0);
-	path->keep_locks = 1;
+	path->keep_locks = true;
 again:
 	cur = btrfs_read_lock_root_node(root);
 	level = btrfs_header_level(cur);
@@ -4707,7 +4704,7 @@ out:
  * 0 is returned if another key is found, < 0 if there are any errors
  * and 1 is returned if there are no higher keys in the tree
  *
- * path->keep_locks should be set to 1 on the search made before
+ * path->keep_locks should be set to true on the search made before
  * calling this function.
  */
 int btrfs_find_next_key(struct btrfs_root *root, struct btrfs_path *path,
@@ -4806,13 +4803,13 @@ again:
 	next = NULL;
 	btrfs_release_path(path);
 
-	path->keep_locks = 1;
+	path->keep_locks = true;
 
 	if (time_seq) {
 		ret = btrfs_search_old_slot(root, &key, path, time_seq);
 	} else {
 		if (path->need_commit_sem) {
-			path->need_commit_sem = 0;
+			path->need_commit_sem = false;
 			need_commit_sem = true;
 			if (path->nowait) {
 				if (!down_read_trylock(&fs_info->commit_root_sem)) {
@@ -4825,7 +4822,7 @@ again:
 		}
 		ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
 	}
-	path->keep_locks = 0;
+	path->keep_locks = false;
 
 	if (ret < 0)
 		goto done;
@@ -4964,7 +4961,7 @@ done:
 	if (need_commit_sem) {
 		int ret2;
 
-		path->need_commit_sem = 1;
+		path->need_commit_sem = true;
 		ret2 = finish_need_commit_sem_search(path);
 		up_read(&fs_info->commit_root_sem);
 		if (ret2)
