@@ -3258,12 +3258,6 @@ int btrfs_check_features(struct btrfs_fs_info *fs_info, bool is_rw_mount)
 			   PAGE_SIZE, fs_info->sectorsize);
 		return -EINVAL;
 	}
-	if (fs_info->sectorsize > PAGE_SIZE && btrfs_fs_incompat(fs_info, RAID56)) {
-		btrfs_err(fs_info,
-		"RAID56 is not supported for page size %lu with sectorsize %u",
-			  PAGE_SIZE, fs_info->sectorsize);
-		return -EINVAL;
-	}
 
 	/* This can be called by remount, we need to protect the super block. */
 	spin_lock(&fs_info->super_lock);
@@ -3406,7 +3400,7 @@ int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_device
 	 * Handle the space caching options appropriately now that we have the
 	 * super block loaded and validated.
 	 */
-	btrfs_set_free_space_cache_settings(fs_info);
+	btrfs_set_free_space_cache_settings(fs_info, &fs_info->mount_opt);
 
 	if (!btrfs_check_options(fs_info, &fs_info->mount_opt, sb->s_flags)) {
 		ret = -EINVAL;

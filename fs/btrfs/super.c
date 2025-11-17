@@ -723,10 +723,10 @@ bool btrfs_check_options(const struct btrfs_fs_info *info,
 }
 
 /*
- * This is subtle, we only call this during open_ctree().  We need to pre-load
- * the mount options with the on-disk settings.  Before the new mount API took
- * effect we would do this on mount and remount.  With the new mount API we'll
- * only do this on the initial mount.
+ * Because we have an odd set of behavior with turning on and off the space cache
+ * and free space tree we have to call this before we start the mount operation
+ * after we load the super, or before we start remount.  This is to make sure we
+ * have the proper free space settings in place if the user didn't specify any.
  *
  * This isn't a change in behavior, because we're using the current state of the
  * file system to set the current mount options.  If you mounted with special
@@ -734,15 +734,16 @@ bool btrfs_check_options(const struct btrfs_fs_info *info,
  * settings, because mounting without these features cleared the on-disk
  * settings, so this being called on re-mount is not needed.
  */
-void btrfs_set_free_space_cache_settings(struct btrfs_fs_info *fs_info)
+void btrfs_set_free_space_cache_settings(struct btrfs_fs_info *fs_info,
+					 unsigned long long *mount_opt)
 {
 	if (fs_info->sectorsize < PAGE_SIZE) {
-		btrfs_clear_opt(fs_info->mount_opt, SPACE_CACHE);
-		if (!btrfs_test_opt(fs_info, FREE_SPACE_TREE)) {
+		btrfs_clear_opt(*mount_opt, SPACE_CACHE);
+		if (!btrfs_raw_test_opt(*mount_opt, FREE_SPACE_TREE)) {
 			btrfs_info(fs_info,
 				   "forcing free space tree for sector size %u with page size %lu",
 				   fs_info->sectorsize, PAGE_SIZE);
-			btrfs_set_opt(fs_info->mount_opt, FREE_SPACE_TREE);
+			btrfs_set_opt(*mount_opt, FREE_SPACE_TREE);
 		}
 	}
 
@@ -750,7 +751,7 @@ void btrfs_set_free_space_cache_settings(struct btrfs_fs_info *fs_info)
 	 * At this point our mount options are populated, so we only mess with
 	 * these settings if we don't have any settings already.
 	 */
-	if (btrfs_test_opt(fs_info, FREE_SPACE_TREE))
+	if (btrfs_raw_test_opt(*mount_opt, FREE_SPACE_TREE))
 		return;
 
 	if (btrfs_is_zoned(fs_info) &&
@@ -760,10 +761,10 @@ void btrfs_set_free_space_cache_settings(struct btrfs_fs_info *fs_info)
 		return;
 	}
 
-	if (btrfs_test_opt(fs_info, SPACE_CACHE))
+	if (btrfs_raw_test_opt(*mount_opt, SPACE_CACHE))
 		return;
 
-	if (btrfs_test_opt(fs_info, NOSPACECACHE))
+	if (btrfs_raw_test_opt(*mount_opt, NOSPACECACHE))
 		return;
 
 	/*
@@ -771,9 +772,9 @@ void btrfs_set_free_space_cache_settings(struct btrfs_fs_info *fs_info)
 	 * them ourselves based on the state of the file system.
 	 */
 	if (btrfs_fs_compat_ro(fs_info, FREE_SPACE_TREE))
-		btrfs_set_opt(fs_info->mount_opt, FREE_SPACE_TREE);
+		btrfs_set_opt(*mount_opt, FREE_SPACE_TREE);
 	else if (btrfs_free_space_cache_v1_active(fs_info))
-		btrfs_set_opt(fs_info->mount_opt, SPACE_CACHE);
+		btrfs_set_opt(*mount_opt, SPACE_CACHE);
 }
 
 static void set_device_specific_options(struct btrfs_fs_info *fs_info)
@@ -1523,6 +1524,7 @@ static int btrfs_reconfigure(struct fs_context *fc)
 
 	sync_filesystem(sb);
 	set_bit(BTRFS_FS_STATE_REMOUNTING, &fs_info->fs_state);
+	btrfs_set_free_space_cache_settings(fs_info, &ctx->mount_opt);
 
 	if (!btrfs_check_options(fs_info, &ctx->mount_opt, fc->sb_flags))
 		return -EINVAL;

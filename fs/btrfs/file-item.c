@@ -765,14 +765,12 @@ fail:
 	return ret;
 }
 
-static void csum_one_bio(struct btrfs_bio *bbio, struct bvec_iter *src)
+static void csum_one_bio(struct btrfs_bio *bbio, struct bio *bio, struct bvec_iter *iter)
 {
 	struct btrfs_inode *inode = bbio->inode;
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
 	SHASH_DESC_ON_STACK(shash, fs_info->csum_shash);
-	struct bio *bio = &bbio->bio;
 	struct btrfs_ordered_sum *sums = bbio->sums;
-	struct bvec_iter iter = *src;
 	phys_addr_t paddr;
 	const u32 blocksize = fs_info->sectorsize;
 	const u32 step = min(blocksize, PAGE_SIZE);
@@ -783,7 +781,7 @@ static void csum_one_bio(struct btrfs_bio *bbio, struct bvec_iter *src)
 
 	shash->tfm = fs_info->csum_shash;
 
-	btrfs_bio_for_each_block(paddr, bio, &iter, step) {
+	btrfs_bio_for_each_block(paddr, bio, iter, step) {
 		paddrs[(offset / step) % nr_steps] = paddr;
 		offset += step;
 
@@ -800,19 +798,18 @@ static void csum_one_bio_work(struct work_struct *work)
 
 	ASSERT(btrfs_op(&bbio->bio) == BTRFS_MAP_WRITE);
 	ASSERT(bbio->async_csum == true);
-	csum_one_bio(bbio, &bbio->csum_saved_iter);
+	csum_one_bio(bbio, bbio->csum_bio, &bbio->csum_saved_iter);
 	complete(&bbio->csum_done);
 }
 
 /*
  * Calculate checksums of the data contained inside a bio.
  */
-int btrfs_csum_one_bio(struct btrfs_bio *bbio, bool async)
+int btrfs_csum_one_bio(struct btrfs_bio *bbio, struct bio *bio, bool async)
 {
 	struct btrfs_ordered_extent *ordered = bbio->ordered;
 	struct btrfs_inode *inode = bbio->inode;
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
-	struct bio *bio = &bbio->bio;
 	struct btrfs_ordered_sum *sums;
 	unsigned nofs_flag;
 
@@ -824,19 +821,21 @@ int btrfs_csum_one_bio(struct btrfs_bio *bbio, bool async)
 	if (!sums)
 		return -ENOMEM;
 
-	sums->logical = bio->bi_iter.bi_sector << SECTOR_SHIFT;
+	sums->logical = bbio->orig_logical;
 	sums->len = bio->bi_iter.bi_size;
 	INIT_LIST_HEAD(&sums->list);
 	bbio->sums = sums;
 	btrfs_add_ordered_sum(ordered, sums);
 
 	if (!async) {
-		csum_one_bio(bbio, &bbio->bio.bi_iter);
+		struct bvec_iter iter = bio->bi_iter;
+		csum_one_bio(bbio, bio, &iter);
 		return 0;
 	}
 	init_completion(&bbio->csum_done);
 	bbio->async_csum = true;
-	bbio->csum_saved_iter = bbio->bio.bi_iter;
+	bbio->csum_bio = bio;
+	bbio->csum_saved_iter = bio->bi_iter;
 	INIT_WORK(&bbio->csum_work, csum_one_bio_work);
 	schedule_work(&bbio->csum_work);
 	return 0;

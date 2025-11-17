@@ -862,6 +862,76 @@ struct extent_buffer *btrfs_read_node_slot(struct extent_buffer *parent,
 }
 
 /*
+ * Promote a child node to become the new tree root.
+ *
+ * This helper is called during rebalancing when the root node contains only
+ * a single item (nritems == 1).  We can reduce the tree height by promoting
+ * that child to become the new root and freeing the old root node.  The path
+ * locks and references are updated accordingly.
+ *
+ * @trans: Transaction handle
+ * @root: Tree root structure to update
+ * @path: Path holding nodes and locks
+ * @level: Level of the parent (old root)
+ * @parent: The parent (old root) with exactly one item
+ *
+ * Return: 0 on success, negative errno on failure.  The transaction is aborted
+ * on critical errors.
+ */
+static noinline int promote_child_to_root(struct btrfs_trans_handle *trans,
+				    struct btrfs_root *root,
+				    struct btrfs_path *path,
+				    int level,
+				    struct extent_buffer *parent)
+{
+	struct extent_buffer *child;
+	int ret = 0;
+
+	ASSERT(btrfs_header_nritems(parent) == 1);
+
+	child = btrfs_read_node_slot(parent, 0);
+	if (IS_ERR(child))
+		return PTR_ERR(child);
+
+	btrfs_tree_lock(child);
+	ret = btrfs_cow_block(trans, root, child, parent, 0, &child,
+			      BTRFS_NESTING_COW);
+	if (ret) {
+		btrfs_tree_unlock(child);
+		free_extent_buffer(child);
+		return ret;
+	}
+
+	ret = btrfs_tree_mod_log_insert_root(root->node, child, true);
+	if (unlikely(ret < 0)) {
+		btrfs_tree_unlock(child);
+		free_extent_buffer(child);
+		btrfs_abort_transaction(trans, ret);
+		return ret;
+	}
+	rcu_assign_pointer(root->node, child);
+
+	add_root_to_dirty_list(root);
+	btrfs_tree_unlock(child);
+
+	path->locks[level] = 0;
+	path->nodes[level] = NULL;
+	btrfs_clear_buffer_dirty(trans, parent);
+	btrfs_tree_unlock(parent);
+	/* once for the path */
+	free_extent_buffer(parent);
+
+	root_sub_used_bytes(root);
+	ret = btrfs_free_tree_block(trans, btrfs_root_id(root), parent, 0, 1);
+	/* once for the root ptr */
+	free_extent_buffer_stale(parent);
+	if (unlikely(ret < 0)) {
+		btrfs_abort_transaction(trans, ret);
+		return ret;
+	}
+	return 0;
+}
+/*
  * node level balancing, used to make sure nodes are in proper order for
  * item deletion.  We balance from the top down, so we have to make sure
  * that a deletion won't leave an node completely empty later on.
@@ -900,55 +970,11 @@ static noinline int balance_level(struct btrfs_trans_handle *trans,
 	 * by promoting the node below to a root
 	 */
 	if (!parent) {
-		struct extent_buffer *child;
-
 		if (btrfs_header_nritems(mid) != 1)
 			return 0;
 
 		/* promote the child to a root */
-		child = btrfs_read_node_slot(mid, 0);
-		if (IS_ERR(child)) {
-			ret = PTR_ERR(child);
-			goto out;
-		}
-
-		btrfs_tree_lock(child);
-		ret = btrfs_cow_block(trans, root, child, mid, 0, &child,
-				      BTRFS_NESTING_COW);
-		if (ret) {
-			btrfs_tree_unlock(child);
-			free_extent_buffer(child);
-			goto out;
-		}
-
-		ret = btrfs_tree_mod_log_insert_root(root->node, child, true);
-		if (unlikely(ret < 0)) {
-			btrfs_tree_unlock(child);
-			free_extent_buffer(child);
-			btrfs_abort_transaction(trans, ret);
-			goto out;
-		}
-		rcu_assign_pointer(root->node, child);
-
-		add_root_to_dirty_list(root);
-		btrfs_tree_unlock(child);
-
-		path->locks[level] = 0;
-		path->nodes[level] = NULL;
-		btrfs_clear_buffer_dirty(trans, mid);
-		btrfs_tree_unlock(mid);
-		/* once for the path */
-		free_extent_buffer(mid);
-
-		root_sub_used_bytes(root);
-		ret = btrfs_free_tree_block(trans, btrfs_root_id(root), mid, 0, 1);
-		/* once for the root ptr */
-		free_extent_buffer_stale(mid);
-		if (unlikely(ret < 0)) {
-			btrfs_abort_transaction(trans, ret);
-			goto out;
-		}
-		return 0;
+		return promote_child_to_root(trans, root, path, level, mid);
 	}
 	if (btrfs_header_nritems(mid) >
 	    BTRFS_NODEPTRS_PER_BLOCK(fs_info) / 4)
@@ -1101,11 +1127,12 @@ static noinline int balance_level(struct btrfs_trans_handle *trans,
 	/* update the path */
 	if (left) {
 		if (btrfs_header_nritems(left) > orig_slot) {
-			refcount_inc(&left->refs);
 			/* left was locked after cow */
 			path->nodes[level] = left;
 			path->slots[level + 1] -= 1;
 			path->slots[level] = orig_slot;
+			/* left is now owned by path */
+			left = NULL;
 			if (mid) {
 				btrfs_tree_unlock(mid);
 				free_extent_buffer(mid);
@@ -1125,8 +1152,7 @@ out:
 		free_extent_buffer(right);
 	}
 	if (left) {
-		if (path->nodes[level] != left)
-			btrfs_tree_unlock(left);
+		btrfs_tree_unlock(left);
 		free_extent_buffer(left);
 	}
 	return ret;
@@ -4496,9 +4522,7 @@ int btrfs_del_items(struct btrfs_trans_handle *trans, struct btrfs_root *root,
 
 	/* delete the leaf if we've emptied it */
 	if (nritems == 0) {
-		if (leaf == root->node) {
-			btrfs_set_header_level(leaf, 0);
-		} else {
+		if (leaf != root->node) {
 			btrfs_clear_buffer_dirty(trans, leaf);
 			ret = btrfs_del_leaf(trans, root, path, leaf);
 			if (ret < 0)
@@ -4829,34 +4853,22 @@ again:
 
 	nritems = btrfs_header_nritems(path->nodes[0]);
 	/*
-	 * by releasing the path above we dropped all our locks.  A balance
-	 * could have added more items next to the key that used to be
-	 * at the very end of the block.  So, check again here and
-	 * advance the path if there are now more items available.
+	 * By releasing the path above we dropped all our locks.  A balance
+	 * could have happened and
+	 *
+	 * 1. added more items after the previous last item
+	 * 2. deleted the previous last item
+	 *
+	 * So, check again here and advance the path if there are now more items available.
 	 */
-	if (nritems > 0 && path->slots[0] < nritems - 1) {
-		if (ret == 0)
+	if (nritems > 0 && path->slots[0] <= nritems - 1) {
+		if (ret == 0 && path->slots[0] != nritems - 1) {
 			path->slots[0]++;
-		ret = 0;
-		goto done;
-	}
-	/*
-	 * So the above check misses one case:
-	 * - after releasing the path above, someone has removed the item that
-	 *   used to be at the very end of the block, and balance between leafs
-	 *   gets another one with bigger key.offset to replace it.
-	 *
-	 * This one should be returned as well, or we can get leaf corruption
-	 * later(esp. in __btrfs_drop_extents()).
-	 *
-	 * And a bit more explanation about this check,
-	 * with ret > 0, the key isn't found, the path points to the slot
-	 * where it should be inserted, so the path->slots[0] item must be the
-	 * bigger one.
-	 */
-	if (nritems > 0 && ret > 0 && path->slots[0] == nritems - 1) {
-		ret = 0;
-		goto done;
+			goto done;
+		} else if (ret > 0) {
+			ret = 0;
+			goto done;
+		}
 	}
 
 	while (level < BTRFS_MAX_LEVEL) {
