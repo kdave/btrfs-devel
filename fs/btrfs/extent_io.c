@@ -1602,91 +1602,94 @@ out:
 	return 0;
 }
 
+
 /*
- * Return 0 if we have submitted or queued the sector for submission.
- * Return <0 for critical errors, and the involved sector will be cleaned up.
+ * Return 0 if we have submitted or queued the range for submission.
+ * Return <0 for critical errors, and the involved blocks will be cleaned up.
  *
- * Caller should make sure filepos < i_size and handle filepos >= i_size case.
+ * Caller should make sure the range doesn't go beyond the last block of the inode.
  */
-static int submit_one_sector(struct btrfs_inode *inode,
-			     struct folio *folio,
-			     u64 filepos, struct btrfs_bio_ctrl *bio_ctrl,
-			     loff_t i_size)
+static int submit_range(struct btrfs_inode *inode, struct folio *folio,
+			u64 start, u32 len, struct btrfs_bio_ctrl *bio_ctrl)
 {
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
-	struct extent_map *em;
-	u64 block_start;
-	u64 disk_bytenr;
-	u64 extent_offset;
-	u64 em_end;
 	const u32 sectorsize = fs_info->sectorsize;
+	u64 cur = start;
 
-	ASSERT(IS_ALIGNED(filepos, sectorsize));
+	ASSERT(IS_ALIGNED(start, sectorsize));
+	ASSERT(IS_ALIGNED(len, sectorsize));
+	ASSERT(start + len <= folio_end(folio));
 
-	/* @filepos >= i_size case should be handled by the caller. */
-	ASSERT(filepos < i_size);
+	while (cur < start + len) {
+		struct extent_map *em;
+		u64 block_start;
+		u64 disk_bytenr;
+		u64 extent_offset;
+		u64 em_end;
+		u32 cur_len = start + len - cur;
 
-	em = btrfs_get_extent(inode, NULL, filepos, sectorsize);
-	if (IS_ERR(em)) {
+		em = btrfs_get_extent(inode, NULL, cur, cur_len);
+		if (IS_ERR(em)) {
+			/*
+			 * bio_ctrl may contain a bio crossing several folios.
+			 * Submit it immediately so that the bio has a chance
+			 * to finish normally, other than marked as error.
+			 */
+			submit_one_bio(bio_ctrl);
+
+			/*
+			 * When submission failed, we should still clear the folio dirty.
+			 * Or the folio will be written back again but without any
+			 * ordered extent.
+			 */
+			btrfs_folio_clear_dirty(fs_info, folio, cur, cur_len);
+			btrfs_folio_set_writeback(fs_info, folio, cur, cur_len);
+			btrfs_folio_clear_writeback(fs_info, folio, cur, cur_len);
+
+			/*
+			 * Since there is no bio submitted to finish the ordered
+			 * extent, we have to manually finish this range.
+			 */
+			btrfs_mark_ordered_io_finished(inode, folio, cur, cur_len, false);
+			return PTR_ERR(em);
+		}
+		extent_offset = cur - em->start;
+		em_end = btrfs_extent_map_end(em);
+		ASSERT(cur <= em_end);
+		ASSERT(IS_ALIGNED(em->start, sectorsize));
+		ASSERT(IS_ALIGNED(em->len, sectorsize));
+
+		block_start = btrfs_extent_map_block_start(em);
+		disk_bytenr = btrfs_extent_map_block_start(em) + extent_offset;
+
+		ASSERT(!btrfs_extent_map_is_compressed(em));
+		ASSERT(block_start != EXTENT_MAP_HOLE);
+		ASSERT(block_start != EXTENT_MAP_INLINE);
+
+		cur_len = min(cur_len, em_end - cur);
+		btrfs_free_extent_map(em);
+		em = NULL;
+
 		/*
-		 * bio_ctrl may contain a bio crossing several folios.
-		 * Submit it immediately so that the bio has a chance
-		 * to finish normally, other than marked as error.
+		 * Although the PageDirty bit is cleared before entering this
+		 * function, subpage dirty bit is not cleared.
+		 * So clear subpage dirty bit here so next time we won't submit
+		 * a folio for a range already written to disk.
 		 */
-		submit_one_bio(bio_ctrl);
-
+		btrfs_folio_clear_dirty(fs_info, folio, cur, cur_len);
+		btrfs_folio_set_writeback(fs_info, folio, cur, cur_len);
 		/*
-		 * When submission failed, we should still clear the folio dirty.
-		 * Or the folio will be written back again but without any
-		 * ordered extent.
+		 * Above call should set the whole folio with writeback flag, even
+		 * just for a single subpage block.
+		 * As long as the folio is properly locked and the range is correct,
+		 * we should always get the folio with writeback flag.
 		 */
-		btrfs_folio_clear_dirty(fs_info, folio, filepos, sectorsize);
-		btrfs_folio_set_writeback(fs_info, folio, filepos, sectorsize);
-		btrfs_folio_clear_writeback(fs_info, folio, filepos, sectorsize);
+		ASSERT(folio_test_writeback(folio));
 
-		/*
-		 * Since there is no bio submitted to finish the ordered
-		 * extent, we have to manually finish this sector.
-		 */
-		btrfs_mark_ordered_io_finished(inode, folio, filepos,
-					       fs_info->sectorsize, false);
-		return PTR_ERR(em);
+		submit_extent_folio(bio_ctrl, disk_bytenr, folio,
+				    cur_len, cur - folio_pos(folio), 0);
+		cur += cur_len;
 	}
-
-	extent_offset = filepos - em->start;
-	em_end = btrfs_extent_map_end(em);
-	ASSERT(filepos <= em_end);
-	ASSERT(IS_ALIGNED(em->start, sectorsize));
-	ASSERT(IS_ALIGNED(em->len, sectorsize));
-
-	block_start = btrfs_extent_map_block_start(em);
-	disk_bytenr = btrfs_extent_map_block_start(em) + extent_offset;
-
-	ASSERT(!btrfs_extent_map_is_compressed(em));
-	ASSERT(block_start != EXTENT_MAP_HOLE);
-	ASSERT(block_start != EXTENT_MAP_INLINE);
-
-	btrfs_free_extent_map(em);
-	em = NULL;
-
-	/*
-	 * Although the PageDirty bit is cleared before entering this
-	 * function, subpage dirty bit is not cleared.
-	 * So clear subpage dirty bit here so next time we won't submit
-	 * a folio for a range already written to disk.
-	 */
-	btrfs_folio_clear_dirty(fs_info, folio, filepos, sectorsize);
-	btrfs_folio_set_writeback(fs_info, folio, filepos, sectorsize);
-	/*
-	 * Above call should set the whole folio with writeback flag, even
-	 * just for a single subpage sector.
-	 * As long as the folio is properly locked and the range is correct,
-	 * we should always get the folio with writeback flag.
-	 */
-	ASSERT(folio_test_writeback(folio));
-
-	submit_extent_folio(bio_ctrl, disk_bytenr, folio,
-			    sectorsize, filepos - folio_pos(folio), 0);
 	return 0;
 }
 
@@ -1712,8 +1715,9 @@ static noinline_for_stack int extent_writepage_io(struct btrfs_inode *inode,
 	const u64 folio_start = folio_pos(folio);
 	const u64 folio_end = folio_start + folio_size(folio);
 	const unsigned int blocks_per_folio = btrfs_blocks_per_folio(fs_info, folio);
-	u64 cur;
-	int bit;
+	unsigned int start_bit;
+	unsigned int end_bit;
+	const u64 rounded_isize = round_up(i_size, fs_info->sectorsize);
 	int ret = 0;
 
 	ASSERT(start >= folio_start, "start=%llu folio_start=%llu", start, folio_start);
@@ -1741,23 +1745,31 @@ static noinline_for_stack int extent_writepage_io(struct btrfs_inode *inode,
 
 	bio_ctrl->end_io_func = end_bbio_data_write;
 
-	for_each_set_bit(bit, &bio_ctrl->submit_bitmap, blocks_per_folio) {
-		cur = folio_pos(folio) + (bit << fs_info->sectorsize_bits);
+	for_each_set_bitrange(start_bit, end_bit, &bio_ctrl->submit_bitmap, blocks_per_folio) {
+		const u64 cur_start = folio_pos(folio) + (start_bit << fs_info->sectorsize_bits);
+		u32 cur_len = (end_bit - start_bit) << fs_info->sectorsize_bits;
 
-		if (cur >= i_size) {
-			btrfs_mark_ordered_io_truncated(inode, folio, cur, end - cur);
+		if (cur_start > rounded_isize) {
 			/*
-			 * This range is beyond i_size, thus we don't need to
-			 * bother writing back.
-			 * But we still need to clear the dirty subpage bit, or
-			 * the next time the folio gets dirtied, we will try to
-			 * writeback the sectors with subpage dirty bits,
-			 * causing writeback without ordered extent.
+			 * The whole range is beyond EOF.
+			 *
+			 * Just finish the IO and skip to the next range.
 			 */
-			btrfs_folio_clear_dirty(fs_info, folio, cur, end - cur);
-			break;
+			btrfs_mark_ordered_io_truncated(inode, folio, cur_start, cur_len);
+			btrfs_folio_clear_dirty(fs_info, folio, cur_start, cur_len);
+			continue;
 		}
-		ret = submit_one_sector(inode, folio, cur, bio_ctrl, i_size);
+		if (cur_start + cur_len > rounded_isize) {
+			u32 truncate_len = cur_start + cur_len - rounded_isize;
+
+			/* The tailing part of the range is beyond EOF. */
+			btrfs_mark_ordered_io_truncated(inode, folio, rounded_isize, truncate_len);
+			btrfs_folio_clear_dirty(fs_info, folio, rounded_isize, truncate_len);
+			/* Shrink the range inside the EOF. */
+			cur_len = rounded_isize - cur_start;
+		}
+
+		ret = submit_range(inode, folio, cur_start, cur_len, bio_ctrl);
 		if (unlikely(ret < 0)) {
 			if (!found_error)
 				found_error = ret;
