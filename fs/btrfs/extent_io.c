@@ -1725,24 +1725,7 @@ static noinline_for_stack int extent_writepage_io(struct btrfs_inode *inode,
 		cur = folio_pos(folio) + (bit << fs_info->sectorsize_bits);
 
 		if (cur >= i_size) {
-			struct btrfs_ordered_extent *ordered;
-
-			ordered = btrfs_lookup_first_ordered_range(inode, cur,
-								   folio_end - cur);
-			/*
-			 * We have just run delalloc before getting here, so
-			 * there must be an ordered extent.
-			 */
-			ASSERT(ordered != NULL);
-			spin_lock(&inode->ordered_tree_lock);
-			set_bit(BTRFS_ORDERED_TRUNCATED, &ordered->flags);
-			ordered->truncated_len = min(ordered->truncated_len,
-						     cur - ordered->file_offset);
-			spin_unlock(&inode->ordered_tree_lock);
-			btrfs_put_ordered_extent(ordered);
-
-			btrfs_mark_ordered_io_finished(inode, folio, cur,
-						       end - cur, true);
+			btrfs_mark_ordered_io_truncated(inode, folio, cur, end - cur);
 			/*
 			 * This range is beyond i_size, thus we don't need to
 			 * bother writing back.

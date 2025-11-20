@@ -547,6 +547,44 @@ void btrfs_mark_ordered_io_finished(struct btrfs_inode *inode,
 }
 
 /*
+ * Mark all ordered extents io inside the specified range as truncated.
+ *
+ * This is utilized by writeback path, thus there must be an ordered extent
+ * for the range.
+ */
+void btrfs_mark_ordered_io_truncated(struct btrfs_inode *inode, struct folio *folio,
+				     u64 file_offset, u32 len)
+{
+	u64 cur = file_offset;
+
+	ASSERT(file_offset >= folio_pos(folio));
+	ASSERT(file_offset + len <= folio_end(folio));
+
+	while  (cur < file_offset + len) {
+		u32 cur_len = file_offset + len - cur;
+		struct btrfs_ordered_extent *ordered;
+
+		ordered = btrfs_lookup_first_ordered_range(inode, cur, cur_len);
+
+		/*
+		 * We have just run delalloc before getting here, so there must
+		 * be an ordered extent.
+		 */
+		ASSERT(ordered != NULL);
+		scoped_guard(spinlock, &inode->ordered_tree_lock) {
+			set_bit(BTRFS_ORDERED_TRUNCATED, &ordered->flags);
+			ordered->truncated_len = min(ordered->truncated_len,
+						     cur - ordered->file_offset);
+		}
+		cur_len = min(cur_len, ordered->file_offset + ordered->num_bytes - cur);
+		btrfs_put_ordered_extent(ordered);
+
+		cur += cur_len;
+	}
+	btrfs_mark_ordered_io_finished(inode, folio, file_offset, len, true);
+}
+
+/*
  * Finish IO for one ordered extent across a given range.  The range can only
  * contain one ordered extent.
  *
