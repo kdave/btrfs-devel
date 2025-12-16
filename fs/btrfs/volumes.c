@@ -3689,7 +3689,7 @@ static int del_balance_item(struct btrfs_fs_info *fs_info)
 	struct btrfs_trans_handle *trans;
 	struct btrfs_path *path;
 	struct btrfs_key key;
-	int ret, err;
+	int ret;
 
 	path = btrfs_alloc_path();
 	if (!path)
@@ -3716,9 +3716,11 @@ static int del_balance_item(struct btrfs_fs_info *fs_info)
 	ret = btrfs_del_item(trans, root, path);
 out:
 	btrfs_free_path(path);
-	err = btrfs_commit_transaction(trans);
-	if (err && !ret)
-		ret = err;
+	if (ret == 0)
+		ret = btrfs_commit_transaction(trans);
+	else
+		btrfs_end_transaction(trans);
+
 	return ret;
 }
 
