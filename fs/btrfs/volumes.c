@@ -2314,9 +2314,7 @@ int btrfs_rm_device(struct btrfs_fs_info *fs_info,
 		free_fs_devices(cur_devices);
 	}
 
-	ret = btrfs_commit_transaction(trans);
-
-	return ret;
+	return btrfs_commit_transaction(trans);
 
 error_undo:
 	if (test_bit(BTRFS_DEV_STATE_WRITEABLE, &device->dev_state)) {
@@ -3644,7 +3642,7 @@ static int insert_balance_item(struct btrfs_fs_info *fs_info,
 	struct btrfs_path *path;
 	struct extent_buffer *leaf;
 	struct btrfs_key key;
-	int ret, err;
+	int ret;
 
 	path = btrfs_alloc_path();
 	if (!path)
@@ -3679,9 +3677,11 @@ static int insert_balance_item(struct btrfs_fs_info *fs_info,
 	btrfs_set_balance_flags(leaf, item, bctl->flags);
 out:
 	btrfs_free_path(path);
-	err = btrfs_commit_transaction(trans);
-	if (err && !ret)
-		ret = err;
+	if (ret == 0)
+		ret = btrfs_commit_transaction(trans);
+	else
+		btrfs_end_transaction(trans);
+
 	return ret;
 }
 
@@ -3691,7 +3691,7 @@ static int del_balance_item(struct btrfs_fs_info *fs_info)
 	struct btrfs_trans_handle *trans;
 	struct btrfs_path *path;
 	struct btrfs_key key;
-	int ret, err;
+	int ret;
 
 	path = btrfs_alloc_path();
 	if (!path)
@@ -3718,9 +3718,11 @@ static int del_balance_item(struct btrfs_fs_info *fs_info)
 	ret = btrfs_del_item(trans, root, path);
 out:
 	btrfs_free_path(path);
-	err = btrfs_commit_transaction(trans);
-	if (err && !ret)
-		ret = err;
+	if (ret == 0)
+		ret = btrfs_commit_transaction(trans);
+	else
+		btrfs_end_transaction(trans);
+
 	return ret;
 }
 
@@ -7165,7 +7167,6 @@ static int read_one_dev(struct extent_buffer *leaf,
 	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices;
 	struct btrfs_device *device;
 	u64 devid;
-	int ret;
 	u8 fs_uuid[BTRFS_FSID_SIZE];
 	u8 dev_uuid[BTRFS_UUID_SIZE];
 
@@ -7264,8 +7265,8 @@ static int read_one_dev(struct extent_buffer *leaf,
 		atomic64_add(device->total_bytes - device->bytes_used,
 				&fs_info->free_chunk_space);
 	}
-	ret = 0;
-	return ret;
+
+	return 0;
 }
 
 int btrfs_read_sys_array(struct btrfs_fs_info *fs_info)
