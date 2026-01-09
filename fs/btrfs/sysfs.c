@@ -10,6 +10,7 @@
 #include <linux/completion.h>
 #include <linux/bug.h>
 #include <linux/list.h>
+#include <linux/string_choices.h>
 #include <crypto/hash.h>
 #include "messages.h"
 #include "ctree.h"
@@ -25,6 +26,7 @@
 #include "misc.h"
 #include "fs.h"
 #include "accessors.h"
+#include "zoned.h"
 
 /*
  * Structure name                       Path
@@ -160,8 +162,7 @@ static int can_modify_feature(struct btrfs_feature_attr *fa)
 		clear = BTRFS_FEATURE_INCOMPAT_SAFE_CLEAR;
 		break;
 	default:
-		pr_warn("btrfs: sysfs: unknown feature set %d\n",
-				fa->feature_set);
+		btrfs_warn(NULL, "sysfs: unknown feature set %d", fa->feature_set);
 		return 0;
 	}
 
@@ -410,13 +411,17 @@ static ssize_t supported_sectorsizes_show(struct kobject *kobj,
 					  char *buf)
 {
 	ssize_t ret = 0;
+	bool has_output = false;
 
-	if (BTRFS_MIN_BLOCKSIZE != SZ_4K && BTRFS_MIN_BLOCKSIZE != PAGE_SIZE)
-		ret += sysfs_emit_at(buf, ret, "%u ", BTRFS_MIN_BLOCKSIZE);
-	if (PAGE_SIZE > SZ_4K)
-		ret += sysfs_emit_at(buf, ret, "%u ", SZ_4K);
-	ret += sysfs_emit_at(buf, ret, "%lu\n", PAGE_SIZE);
-
+	for (u32 cur = BTRFS_MIN_BLOCKSIZE; cur <= BTRFS_MAX_BLOCKSIZE; cur *= 2) {
+		if (!btrfs_supported_blocksize(cur))
+			continue;
+		if (has_output)
+			ret += sysfs_emit_at(buf, ret, " ");
+		ret += sysfs_emit_at(buf, ret, "%u", cur);
+		has_output = true;
+	}
+	ret += sysfs_emit_at(buf, ret, "\n");
 	return ret;
 }
 BTRFS_ATTR(static_feature, supported_sectorsizes,
@@ -1138,13 +1143,21 @@ static ssize_t btrfs_commit_stats_show(struct kobject *kobj,
 				       struct kobj_attribute *a, char *buf)
 {
 	struct btrfs_fs_info *fs_info = to_fs_info(kobj);
+	u64 now = ktime_get_ns();
+	u64 start_time = fs_info->commit_stats.critical_section_start_time;
+	u64 pending = 0;
+
+	if (start_time)
+		pending = now - start_time;
 
 	return sysfs_emit(buf,
 		"commits %llu\n"
+		"cur_commit_ms %llu\n"
 		"last_commit_ms %llu\n"
 		"max_commit_ms %llu\n"
 		"total_commit_ms %llu\n",
 		fs_info->commit_stats.commit_count,
+		div_u64(pending, NSEC_PER_MSEC),
 		div_u64(fs_info->commit_stats.last_commit_dur, NSEC_PER_MSEC),
 		div_u64(fs_info->commit_stats.max_commit_dur, NSEC_PER_MSEC),
 		div_u64(fs_info->commit_stats.total_commit_dur, NSEC_PER_MSEC));
@@ -1176,6 +1189,56 @@ static ssize_t btrfs_commit_stats_store(struct kobject *kobj,
 }
 BTRFS_ATTR_RW(, commit_stats, btrfs_commit_stats_show, btrfs_commit_stats_store);
 
+static ssize_t btrfs_zoned_stats_show(struct kobject *kobj,
+				      struct kobj_attribute *a, char *buf)
+{
+	struct btrfs_fs_info *fs_info = to_fs_info(kobj);
+	struct btrfs_block_group *bg;
+	size_t ret = 0;
+
+
+	if (!btrfs_is_zoned(fs_info))
+		return ret;
+
+	spin_lock(&fs_info->zone_active_bgs_lock);
+	ret += sysfs_emit_at(buf, ret, "active block-groups: %zu\n",
+			     list_count_nodes(&fs_info->zone_active_bgs));
+	spin_unlock(&fs_info->zone_active_bgs_lock);
+
+	mutex_lock(&fs_info->reclaim_bgs_lock);
+	spin_lock(&fs_info->unused_bgs_lock);
+	ret += sysfs_emit_at(buf, ret, "\treclaimable: %zu\n",
+			     list_count_nodes(&fs_info->reclaim_bgs));
+	ret += sysfs_emit_at(buf, ret, "\tunused: %zu\n",
+			     list_count_nodes(&fs_info->unused_bgs));
+	spin_unlock(&fs_info->unused_bgs_lock);
+	mutex_unlock(&fs_info->reclaim_bgs_lock);
+
+	ret += sysfs_emit_at(buf, ret, "\tneed reclaim: %s\n",
+			     str_true_false(btrfs_zoned_should_reclaim(fs_info)));
+
+	if (fs_info->data_reloc_bg)
+		ret += sysfs_emit_at(buf, ret,
+				     "data relocation block-group: %llu\n",
+				     fs_info->data_reloc_bg);
+	if (fs_info->treelog_bg)
+		ret += sysfs_emit_at(buf, ret,
+				     "tree-log block-group: %llu\n",
+				     fs_info->treelog_bg);
+
+	spin_lock(&fs_info->zone_active_bgs_lock);
+	ret += sysfs_emit_at(buf, ret, "active zones:\n");
+	list_for_each_entry(bg, &fs_info->zone_active_bgs, active_bg_list) {
+		ret += sysfs_emit_at(buf, ret,
+				     "\tstart: %llu, wp: %llu used: %llu, reserved: %llu, unusable: %llu\n",
+				     bg->start, bg->alloc_offset, bg->used,
+				     bg->reserved, bg->zone_unusable);
+	}
+	spin_unlock(&fs_info->zone_active_bgs_lock);
+	return ret;
+}
+BTRFS_ATTR(, zoned_stats, btrfs_zoned_stats_show);
+
 static ssize_t btrfs_clone_alignment_show(struct kobject *kobj,
 				struct kobj_attribute *a, char *buf)
 {
@@ -1202,7 +1265,7 @@ static ssize_t quota_override_store(struct kobject *kobj,
 {
 	struct btrfs_fs_info *fs_info = to_fs_info(kobj);
 	unsigned long knob;
-	int err;
+	int ret;
 
 	if (!fs_info)
 		return -EPERM;
@@ -1210,9 +1273,9 @@ static ssize_t quota_override_store(struct kobject *kobj,
 	if (!capable(CAP_SYS_RESOURCE))
 		return -EPERM;
 
-	err = kstrtoul(buf, 10, &knob);
-	if (err)
-		return err;
+	ret = kstrtoul(buf, 10, &knob);
+	if (ret)
+		return ret;
 	if (knob > 1)
 		return -EINVAL;
 
@@ -1588,6 +1651,7 @@ static const struct attribute *btrfs_attrs[] = {
 	BTRFS_ATTR_PTR(, bg_reclaim_threshold),
 	BTRFS_ATTR_PTR(, commit_stats),
 	BTRFS_ATTR_PTR(, temp_fsid),
+	BTRFS_ATTR_PTR(, zoned_stats),
 #ifdef CONFIG_BTRFS_EXPERIMENTAL
 	BTRFS_ATTR_PTR(, offload_csum),
 #endif
@@ -1970,13 +2034,12 @@ static const char *alloc_name(struct btrfs_space_info *space_info)
  * Create a sysfs entry for a space info type at path
  * /sys/fs/btrfs/UUID/allocation/TYPE
  */
-int btrfs_sysfs_add_space_info_type(struct btrfs_fs_info *fs_info,
-				    struct btrfs_space_info *space_info)
+int btrfs_sysfs_add_space_info_type(struct btrfs_space_info *space_info)
 {
 	int ret;
 
 	ret = kobject_init_and_add(&space_info->kobj, &space_info_ktype,
-				   fs_info->space_info_kobj, "%s",
+				   space_info->fs_info->space_info_kobj, "%s",
 				   alloc_name(space_info));
 	if (ret) {
 		kobject_put(&space_info->kobj);
@@ -2239,7 +2302,7 @@ void btrfs_kobject_uevent(struct block_device *bdev, enum kobject_action action)
 
 	ret = kobject_uevent(&disk_to_dev(bdev->bd_disk)->kobj, action);
 	if (ret)
-		pr_warn("BTRFS: Sending event '%d' to kobject: '%s' (%p): failed\n",
+		btrfs_warn(NULL, "sending event %d to kobject: '%s' (%p): failed",
 			action, kobject_name(&disk_to_dev(bdev->bd_disk)->kobj),
 			&disk_to_dev(bdev->bd_disk)->kobj);
 }
@@ -2282,15 +2345,15 @@ static struct kset *btrfs_kset;
  */
 int btrfs_sysfs_add_fsid(struct btrfs_fs_devices *fs_devs)
 {
-	int error;
+	int ret;
 
 	init_completion(&fs_devs->kobj_unregister);
 	fs_devs->fsid_kobj.kset = btrfs_kset;
-	error = kobject_init_and_add(&fs_devs->fsid_kobj, &btrfs_ktype, NULL,
-				     "%pU", fs_devs->fsid);
-	if (error) {
+	ret = kobject_init_and_add(&fs_devs->fsid_kobj, &btrfs_ktype, NULL,
+				   "%pU", fs_devs->fsid);
+	if (ret) {
 		kobject_put(&fs_devs->fsid_kobj);
-		return error;
+		return ret;
 	}
 
 	fs_devs->devices_kobj = kobject_create_and_add("devices",
@@ -2316,71 +2379,70 @@ int btrfs_sysfs_add_fsid(struct btrfs_fs_devices *fs_devs)
 
 int btrfs_sysfs_add_mounted(struct btrfs_fs_info *fs_info)
 {
-	int error;
+	int ret;
 	struct btrfs_fs_devices *fs_devs = fs_info->fs_devices;
 	struct kobject *fsid_kobj = &fs_devs->fsid_kobj;
 
-	error = btrfs_sysfs_add_fs_devices(fs_devs);
-	if (error)
-		return error;
+	ret = btrfs_sysfs_add_fs_devices(fs_devs);
+	if (ret)
+		return ret;
 
-	error = sysfs_create_files(fsid_kobj, btrfs_attrs);
-	if (error) {
+	ret = sysfs_create_files(fsid_kobj, btrfs_attrs);
+	if (ret) {
 		btrfs_sysfs_remove_fs_devices(fs_devs);
-		return error;
+		return ret;
 	}
 
-	error = sysfs_create_group(fsid_kobj,
-				   &btrfs_feature_attr_group);
-	if (error)
+	ret = sysfs_create_group(fsid_kobj, &btrfs_feature_attr_group);
+	if (ret)
 		goto failure;
 
 #ifdef CONFIG_BTRFS_DEBUG
 	fs_info->debug_kobj = kobject_create_and_add("debug", fsid_kobj);
 	if (!fs_info->debug_kobj) {
-		error = -ENOMEM;
+		ret = -ENOMEM;
 		goto failure;
 	}
 
-	error = sysfs_create_files(fs_info->debug_kobj, btrfs_debug_mount_attrs);
-	if (error)
+	ret = sysfs_create_files(fs_info->debug_kobj, btrfs_debug_mount_attrs);
+	if (ret)
 		goto failure;
 #endif
 
 	/* Discard directory */
 	fs_info->discard_kobj = kobject_create_and_add("discard", fsid_kobj);
 	if (!fs_info->discard_kobj) {
-		error = -ENOMEM;
+		ret = -ENOMEM;
 		goto failure;
 	}
 
-	error = sysfs_create_files(fs_info->discard_kobj, discard_attrs);
-	if (error)
+	ret = sysfs_create_files(fs_info->discard_kobj, discard_attrs);
+	if (ret)
 		goto failure;
 
-	error = addrm_unknown_feature_attrs(fs_info, true);
-	if (error)
+	ret = addrm_unknown_feature_attrs(fs_info, true);
+	if (ret)
 		goto failure;
 
-	error = sysfs_create_link(fsid_kobj, &fs_info->sb->s_bdi->dev->kobj, "bdi");
-	if (error)
+	ret = sysfs_create_link(fsid_kobj, &fs_info->sb->s_bdi->dev->kobj, "bdi");
+	if (ret)
 		goto failure;
 
 	fs_info->space_info_kobj = kobject_create_and_add("allocation",
 						  fsid_kobj);
 	if (!fs_info->space_info_kobj) {
-		error = -ENOMEM;
+		ret = -ENOMEM;
 		goto failure;
 	}
 
-	error = sysfs_create_files(fs_info->space_info_kobj, allocation_attrs);
-	if (error)
+	ret = sysfs_create_files(fs_info->space_info_kobj, allocation_attrs);
+	if (ret)
 		goto failure;
 
 	return 0;
 failure:
 	btrfs_sysfs_remove_mounted(fs_info);
-	return error;
+	return ret;
 }
 
 static ssize_t qgroup_enabled_show(struct kobject *qgroups_kobj,
