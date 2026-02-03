@@ -3742,8 +3742,7 @@ static void btrfs_end_super_write(struct bio *bio)
  * Write superblock @sb to the @device. Do not wait for completion, all the
  * folios we use for writing are locked.
  *
- * Write @max_mirrors copies of the superblock, where 0 means default that fit
- * the expected device size at commit time. Note that max_mirrors must be
+ * Write @max_mirrors copies of the superblock. Note that max_mirrors must be
  * same for write and wait phases.
  *
  * Return number of errors when folio is not found or submission fails.
@@ -3758,9 +3757,6 @@ static int write_dev_supers(struct btrfs_device *device,
 	u64 bytenr, bytenr_orig;
 
 	atomic_set(&device->sb_write_errors, 0);
-
-	if (max_mirrors == 0)
-		max_mirrors = BTRFS_SUPER_MIRROR_MAX;
 
 	for (i = 0; i < max_mirrors; i++) {
 		struct folio *folio;
@@ -3845,9 +3841,6 @@ static int wait_dev_supers(struct btrfs_device *device, int max_mirrors)
 	bool primary_failed = false;
 	int ret;
 	u64 bytenr;
-
-	if (max_mirrors == 0)
-		max_mirrors = BTRFS_SUPER_MIRROR_MAX;
 
 	for (i = 0; i < max_mirrors; i++) {
 		struct folio *folio;
@@ -4018,13 +4011,14 @@ int btrfs_get_num_tolerated_disk_barrier_failures(u64 flags)
 	return min_tolerated;
 }
 
-int write_all_supers(struct btrfs_trans_handle *trans, int max_mirrors)
+int write_all_supers(struct btrfs_trans_handle *trans)
 {
 	struct btrfs_fs_info *fs_info = trans->fs_info;
 	struct list_head *head;
 	struct btrfs_device *dev;
 	struct btrfs_super_block *sb;
 	struct btrfs_dev_item *dev_item;
+	int max_mirrors;
 	int ret;
 	int do_barriers;
 	int max_errors;
@@ -4033,13 +4027,13 @@ int write_all_supers(struct btrfs_trans_handle *trans, int max_mirrors)
 
 	do_barriers = !btrfs_test_opt(fs_info, NOBARRIER);
 
-	/*
-	 * max_mirrors == 0 indicates we're from commit_transaction,
-	 * not from fsync where the tree roots in fs_info have not
-	 * been consistent on disk.
-	 */
-	if (max_mirrors == 0)
+	if (trans->in_fsync) {
+		max_mirrors = 1;
+	} else {
+		/* We are called from transaction commit. */
+		max_mirrors = BTRFS_SUPER_MIRROR_MAX;
 		backup_super_roots(fs_info);
+	}
 
 	sb = fs_info->super_for_commit;
 	dev_item = &sb->dev_item;
