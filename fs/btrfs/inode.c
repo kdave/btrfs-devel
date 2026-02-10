@@ -2756,7 +2756,7 @@ static int add_pending_csums(struct btrfs_trans_handle *trans,
 		if (!csum_root)
 			csum_root = btrfs_csum_root(trans->fs_info,
 						    sum->logical);
-		ret = btrfs_csum_file_blocks(trans, csum_root, sum);
+		ret = btrfs_insert_data_csums(trans, csum_root, sum);
 		trans->adding_csums = false;
 		if (ret)
 			return ret;
