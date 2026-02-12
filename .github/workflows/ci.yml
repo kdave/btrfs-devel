@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [ "ci**" ]
+
+concurrency: one_at_a_time_gents
+
+permissions:
+  contents: read
+  checks: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+    - uses: actions/checkout@v4
+    - run: pwd
+    - run: ls -l /mnt/workspace
+    - run: sudo ls -l /etc/sudoers.d
+    - run: /mnt/workspace/kernel-vng-setup `pwd`
+    - run: vng --verbose --build
+
+  deploy:
+    runs-on: [self-hosted, linux, x64]
+    needs: build
+    strategy:
+      matrix:
+        vm: [fstests0]
+    steps:
+    - run: uname -r
+    - run: pwd
+    - run: vng --version
+    - run: vng --verbose -- uname -r
+
+  test:
+    runs-on: [self-hosted, linux, x64]
+    needs: deploy
+    steps:
+    - run: pwd
+    - run: whoami
+    - run: sudo /mnt/workspace/test-run

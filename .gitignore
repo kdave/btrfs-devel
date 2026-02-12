@@ -117,6 +117,7 @@ modules.order
 !.mailmap
 !.pylintrc
 !.rustfmt.toml
+!.github
 
 #
 # Generated include files
