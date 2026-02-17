@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ "ci**" ]
+    branches: [ "ci-virtme-**" ]
 
 concurrency: one_at_a_time_gents
 

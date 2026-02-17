@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+    branches: [ "ci-test" ]
+
+concurrency: one_at_a_time_gents
+
+permissions:
+  contents: read
+  checks: write
+  id-token: write
+
+jobs:
+  build-and-test:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+    - uses: actions/checkout@v4
+    - run: /mnt/workspace/test-env
+    - run: /mnt/workspace/test-run-nord
