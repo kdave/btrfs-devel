@@ -1,0 +1,86 @@
+name: CI kvm
+
+on:
+  push:
+    branches: [ "ci-kvm-virtme**" ]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        #os: [ubuntu-latest, ubuntu-24.04-arm]
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+    - run: type -p udevadm || true
+    - run: uname -a
+    - run: df -h /
+    - run: lsblk
+    # KVM setup
+    - run: sudo chmod 0644 /boot/vmlinuz-*
+    - run: sudo chmod 0666 /dev/kvm
+    - run: sudo ls -dl /boot/*
+    - run: ls -l /dev/kvm
+    - run: sudo apt-get update -y
+    # Kernel build
+    - run: sudo apt-get install -y virtme-ng bc gawk gcc git indent make sed flex bison libelf-dev udev
+    - run: vng --version
+    - run: sudo vng --verbose -r -- uname -a
+    - run: vng --verbose --kconfig
+    - run: make localmodconfig
+    #- run: vng --verbose --build
+    #- run: sudo vng -- uname -a
+    # fstests
+    - run: |
+        sudo apt-get install -y acl attr autoconf automake bc dbench dump e2fsprogs fio gawk \
+            gcc git indent libacl1-dev libaio-dev libcap-dev libgdbm-dev libtool \
+            libtool-bin liburing-dev libuuid1 lvm2 make psmisc python3 quota sed \
+            uuid-dev uuid-runtime xfsprogs linux-headers-$(uname -r) sqlite3 libgdbm-compat-dev \
+            xfsdump xfslibs-dev btrfs-progs pkg-config
+        sudo chmod 0666 /dev/kvm
+        ls -l /dev/kvm
+    - run: |
+        git clone --depth 1 -b local https://github.com/kdave/xfstests $HOME/xfstests
+        pushd $HOME/xfstests
+        autoreconf -vfi
+        ./configure
+        make -j$(nproc)
+        popd
+
+    # Tests
+    - run: pwd
+    - run: |
+        pushd $HOME/xfstests
+        ./check --help || true
+        popd
+    # With --rw we have full access to the host
+    - run: vng --rw -r -- touch $HOME/xfstests/inside-virtme
+    - run: stat $HOME/xfstests/inside-virtme
+    - run: vng --rw -r -- "cd $HOME/xfstests; ./check --help || true"
+    - run: |
+        truncate -s 12g disk{1..9}
+        mkfs.btrfs disk1
+        pushd $HOME/xfstests
+        sudo useradd fsgqa
+        sudo useradd fsgqa2
+        sudo useradd 123456-fsgqa
+        sudo mkdir /mnt/test
+        sudo mkdir /mnt/scratch
+        echo TEST_DEV=/dev/vda >> local.config
+        echo TEST_DIR=/mnt/test >> local.config
+        echo SCRATCH_DEV_POOL="'/dev/vdb /dev/vdc /dev/vdd /dev/vde /dev/vdf /dev/vdg /dev/vdh /dev/vdi'" >> local.config
+        echo LOGWRITES_DEV=/dev/vdi >> local.config
+        echo SCRATCH_MNT=/mnt/scratch >> local.config
+        echo FSTYP=btrfs >> local.config
+        echo MKFS_OPTIONS="'-K -f'" >> local.config
+        echo MOUNT_OPTIONS= >> local.config
+        popd
+    - name: start fstests in VM
+      #run: vng --rw -r --disk disk1 --disk disk2 --user root -- "cd $HOME/xfstests; lslbk; cat local.config; ./check btrfs/001"
+      run: |
+        vng --rw -r \
+        --disk disk1 --disk disk2 --disk disk3 --disk disk4 --disk disk5 \
+        --disk disk6 --disk disk7 --disk disk8 --disk disk9 \
+        --user root -- \
+        "cd $HOME/xfstests; cat /proc/partitions; cat local.config; env --default-signal=PIPE ./check -b -T btrfs/056"
