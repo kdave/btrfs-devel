@@ -13,6 +13,7 @@ jobs:
     strategy:
       matrix:
         group: [ "-g quick", "-g dedupe" ]
+      fail-fast: false
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -89,4 +90,4 @@ jobs:
         --disk disk1 --disk disk2 --disk disk3 --disk disk4 --disk disk5 \
         --disk disk6 --disk disk7 --disk disk8 --disk disk9 \
         --user root --network user -- \
-        "cd $HOME/xfstests; lscpu; free -m; cat /proc/partitions; cat local.config; env --default-signal=PIPE ./check -b -T ${{ matrix.group }}"
+        "cd $HOME/xfstests; lscpu; free -m; cat /proc/partitions; cat local.config; env --default-signal=PIPE ./check -R xunit -b -T ${{ matrix.group }}"
