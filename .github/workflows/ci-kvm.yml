@@ -69,7 +69,7 @@ jobs:
         truncate -s 12g disk{1..9}
         mkfs.btrfs disk1
         pushd $HOME/xfstests
-        sudo useradd fsgqa
+        sudo useradd --create-home fsgqa
         sudo useradd fsgqa2
         sudo useradd 123456-fsgqa
         sudo mkdir /mnt/test
