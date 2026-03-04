@@ -16,6 +16,12 @@ jobs:
     strategy:
       matrix:
         mask: [ "btrfs/[0-9]*", "generic/[0-3]*", "generic/[4-9]*" ]
+        type: [ "normal", "zoned" ]
+        exclude:
+          - mask: "generic/[0-3]*"
+            type: "zoned"
+          - mask: "generic/[4-9]*"
+            type: "zoned"
       fail-fast: false
     runs-on: ubuntu-latest
     steps:
@@ -99,6 +105,18 @@ jobs:
         "cd $HOME/xfstests; lscpu; free -m; cat /proc/partitions; cat local.config; \
          mkfs.btrfs /dev/vda ; \
          env --default-signal=PIPE ./check -R xunit -b -T ${{ matrix.mask }}; \
+         echo FSTESTS FINISHED"
+    - name: "Start fstests in VM (zoned): ${{ matrix.group }}"
+      run: |
+        vng --rw \
+        -o=-device -o=nvme,id=nvme0,serial=deadbeef     \
+        -o=-drive  -o=file=disk1,id=nvmezns0,format=raw,if=none     \
+        -o=-device -o=nvme-ns,drive=nvmezns0,bus=nvme0,nsid=1,zoned=true,zoned.max_active=14,zoned.zone_size=64M
+        -o=-device -o=nvme,id=nvme1,serial=deadcafe     \
+        -o=-drive  -o=file=disk2,id=nvmezns1,format=raw,if=none     \
+        -o=-device -o=nvme-ns,drive=nvmezns1,bus=nvme1,nsid=1,zoned=true,zoned.max_active=14,zoned.zone_size=64M
+        --user root --network user -- \
+        "cd $HOME/xfstests; lscpu; free -m; cat /proc/partitions; cat local.config; env --default-signal=PIPE ./check -R xunit -b -T btrfs/001 btrfs/004"
          echo FSTESTS FINISHED"
     - name: Generate report
       uses: mikepenz/action-junit-report@v6
