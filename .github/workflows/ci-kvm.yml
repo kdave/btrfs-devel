@@ -100,3 +100,18 @@ jobs:
          mkfs.btrfs /dev/vda ; \
          env --default-signal=PIPE ./check -R xunit -b -T ${{ matrix.group }}; \
          echo FSTESTS FINISHED"
+    - name: Generate report
+      uses: mikepenz/action-junit-report@v6
+      if: success() || failure()
+      with:
+        annotate_only: true
+        report_paths: "/home/runner/xfstests/results/result.xml"
+    - name: Save results as artifacts
+      uses: actions/upload-artifact@v6
+      if: success() || failure()
+      with:
+        name: results
+        path: "/home/runner/xfstests/results/"
+    - name: Collect not run tests to summary
+      if: success() || failure()
+      run: /home/runner/xfstests/collect-notrun-to-summary.sh /home/runner/xfstests >> $GITHUB_STEP_SUMMARY
