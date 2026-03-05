@@ -53,7 +53,7 @@ jobs:
             gcc git indent libacl1-dev libaio-dev libcap-dev libgdbm-dev libtool \
             libtool-bin liburing-dev libuuid1 lvm2 make psmisc python3 quota sed \
             uuid-dev uuid-runtime xfsprogs linux-headers-$(uname -r) sqlite3 libgdbm-compat-dev \
-            xfsdump xfslibs-dev btrfs-progs pkg-config
+            xfsdump xfslibs-dev btrfs-progs pkg-config duperemove
         sudo chmod 0666 /dev/kvm
     - name: Build fstests
       run: |
