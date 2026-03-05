@@ -86,7 +86,7 @@ jobs:
     # With --rw we have full access to the host
     - name: "Start fstests in VM: ${{ matrix.group }}"
       run: |
-        vng --rw \
+        sudo vng --rw \
         --disk disk1 --disk disk2 --disk disk3 --disk disk4 --disk disk5 \
         --disk disk6 --disk disk7 --disk disk8 --disk disk9 \
         --user root --network user -- \
