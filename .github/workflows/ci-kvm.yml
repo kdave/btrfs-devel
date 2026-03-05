@@ -42,7 +42,7 @@ jobs:
     - name: Build kernel for virtme
       run: |
         vng --verbose --kconfig --config .github/workflows/kconfig.btrfs --config .github/workflows/kconfig.fstests
-        make localmodconfig
+        #make localmodconfig
         cat .github/workflows/kconfig.btrfs .github/workflows/kconfig.fstests >> .config
         make olddefconfig
         vng --verbose --build
@@ -70,27 +70,33 @@ jobs:
     - name: Setup fstests environment
       run: |
         truncate -s 12g disk{1..9}
-        mkfs.btrfs disk1
         pushd $HOME/xfstests
         sudo useradd --create-home fsgqa
         sudo useradd fsgqa2
         sudo useradd 123456-fsgqa
         sudo mkdir /mnt/test
         sudo mkdir /mnt/scratch
-        echo TEST_DEV=/dev/vda >> local.config
-        echo TEST_DIR=/mnt/test >> local.config
-        echo SCRATCH_DEV_POOL="'/dev/vdb /dev/vdc /dev/vdd /dev/vde /dev/vdf /dev/vdg /dev/vdh /dev/vdi'" >> local.config
-        echo LOGWRITES_DEV=/dev/vdi >> local.config
-        echo SCRATCH_MNT=/mnt/scratch >> local.config
-        echo FSTYP=btrfs >> local.config
-        echo MKFS_OPTIONS="'-K -f'" >> local.config
-        echo MOUNT_OPTIONS= >> local.config
+        echo export TEST_DEV=/dev/vda >> local.config
+        echo export TEST_DIR=/mnt/test >> local.config
+        echo export SCRATCH_DEV_POOL="'/dev/vdb /dev/vdc /dev/vdd /dev/vde /dev/vdf /dev/vdg /dev/vdh /dev/vdi'" >> local.config
+        echo export LOGWRITES_DEV=/dev/vdi >> local.config
+        echo export SCRATCH_MNT=/mnt/scratch >> local.config
+        echo export FSTYP=btrfs >> local.config
+        echo export MKFS_OPTIONS="'-K -f'" >> local.config
+        echo export MOUNT_OPTIONS= >> local.config
         popd
     # With --rw we have full access to the host
+    # FIXME: the mkfs.btrfs should run inside VM and take the MKFS_OPTIONS and TEST_DEV from config
+    # VM setup:
+    # - memory 4GiB
+    # - cpus all from host (usually 4)
     - name: "Start fstests in VM: ${{ matrix.group }}"
       run: |
-        sudo vng --rw \
+        sudo vng --memory 4096 --rw \
         --disk disk1 --disk disk2 --disk disk3 --disk disk4 --disk disk5 \
         --disk disk6 --disk disk7 --disk disk8 --disk disk9 \
         --user root --network user -- \
-        "cd $HOME/xfstests; lscpu; free -m; cat /proc/partitions; cat local.config; env --default-signal=PIPE ./check -R xunit -b -T ${{ matrix.group }}"
+        "cd $HOME/xfstests; lscpu; free -m; cat /proc/partitions; cat local.config; \
+         mkfs.btrfs /dev/vda ; \
+         env --default-signal=PIPE ./check -R xunit -b -T btrfs/001 btrfs/056; \
+         echo FSTESTS FINISHED"
