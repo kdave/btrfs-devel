@@ -98,5 +98,5 @@ jobs:
         --user root --network user -- \
         "cd $HOME/xfstests; lscpu; free -m; cat /proc/partitions; cat local.config; \
          mkfs.btrfs /dev/vda ; \
-         env --default-signal=PIPE ./check -R xunit -b -T btrfs/001 btrfs/056; \
+         env --default-signal=PIPE ./check -R xunit -b -T ${{ matrix.group }}; \
          echo FSTESTS FINISHED"
