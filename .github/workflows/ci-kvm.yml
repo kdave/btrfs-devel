@@ -42,7 +42,7 @@ jobs:
         vng --verbose --kconfig --config .github/workflows/kconfig.btrfs --config .github/workflows/kconfig.fstests
         make localmodconfig
         cat .github/workflows/kconfig.btrfs .github/workflows/kconfig.fstests >> .config
-        yes '' | make oldconfig
+        make olddefconfig
         vng --verbose --build
     - name: Test boot of built kernel
       run: sudo vng -- uname -a
