@@ -15,7 +15,7 @@ jobs:
     if: github.ref != 'refs/heads/ci-kvm'
     strategy:
       matrix:
-        group: [ "-g quick", "-g dedupe" ]
+        mask: [ "btrfs/[0-9]*", "generic/[0-3]*", "generic/[4-9]*" ]
       fail-fast: false
     runs-on: ubuntu-latest
     steps:
@@ -90,7 +90,7 @@ jobs:
     # VM setup:
     # - memory 4GiB
     # - cpus all from host (usually 4)
-    - name: "Start fstests in VM: ${{ matrix.group }}"
+    - name: "Start fstests in VM: ${{ matrix.mask }}"
       run: |
         sudo vng --memory 4096 --rw \
         --disk disk1 --disk disk2 --disk disk3 --disk disk4 --disk disk5 \
@@ -98,7 +98,7 @@ jobs:
         --user root --network user -- \
         "cd $HOME/xfstests; lscpu; free -m; cat /proc/partitions; cat local.config; \
          mkfs.btrfs /dev/vda ; \
-         env --default-signal=PIPE ./check -R xunit -b -T ${{ matrix.group }}; \
+         env --default-signal=PIPE ./check -R xunit -b -T ${{ matrix.mask }}; \
          echo FSTESTS FINISHED"
     - name: Generate report
       uses: mikepenz/action-junit-report@v6
@@ -110,7 +110,7 @@ jobs:
       uses: actions/upload-artifact@v6
       if: success() || failure()
       with:
-        name: results
+        name: "results-${{ matrix.mask }}"
         path: "/home/runner/xfstests/results/"
     - name: Collect not run tests to summary
       if: success() || failure()
