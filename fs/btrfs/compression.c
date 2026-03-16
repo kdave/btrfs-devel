@@ -224,7 +224,6 @@ void btrfs_free_compr_folio(struct folio *folio)
 		return;
 
 free:
-	ASSERT(folio_ref_count(folio) == 1);
 	folio_put(folio);
 }
 
@@ -292,7 +291,7 @@ static void end_bbio_compressed_write(struct btrfs_bio *bbio)
 	struct compressed_bio *cb = to_compressed_bio(bbio);
 	struct folio_iter fi;
 
-	btrfs_finish_ordered_extent(cb->bbio.ordered, NULL, cb->start, cb->len,
+	btrfs_finish_ordered_extent(cb->bbio.ordered, cb->start, cb->len,
 				    cb->bbio.bio.bi_status == BLK_STS_OK);
 
 	if (cb->writeback)
@@ -320,11 +319,16 @@ void btrfs_submit_compressed_write(struct btrfs_ordered_extent *ordered,
 
 	ASSERT(IS_ALIGNED(ordered->file_offset, fs_info->sectorsize));
 	ASSERT(IS_ALIGNED(ordered->num_bytes, fs_info->sectorsize));
-	ASSERT(cb->writeback);
+	/*
+	 * This flag determines if we should clear the writeback flag from the
+	 * page cache. But this function is only utilized by encoded writes, it
+	 * never goes through the page cache.
+	 */
+	ASSERT(!cb->writeback);
 
 	cb->start = ordered->file_offset;
 	cb->len = ordered->num_bytes;
-	cb->compressed_len = ordered->disk_num_bytes;
+	ASSERT(cb->bbio.bio.bi_iter.bi_size == ordered->disk_num_bytes);
 	cb->bbio.bio.bi_iter.bi_sector = ordered->disk_bytenr >> SECTOR_SHIFT;
 	cb->bbio.ordered = ordered;
 
@@ -345,8 +349,7 @@ struct compressed_bio *btrfs_alloc_compressed_write(struct btrfs_inode *inode,
 	cb = alloc_compressed_bio(inode, start, REQ_OP_WRITE, end_bbio_compressed_write);
 	cb->start = start;
 	cb->len = len;
-	cb->writeback = true;
-
+	cb->writeback = false;
 	return cb;
 }
 
@@ -555,7 +558,6 @@ void btrfs_submit_compressed_read(struct btrfs_bio *bbio)
 	em_start = em->start;
 
 	cb->len = bbio->bio.bi_iter.bi_size;
-	cb->compressed_len = compressed_len;
 	cb->compress_type = btrfs_extent_map_compression(em);
 	cb->orig_bbio = bbio;
 	cb->bbio.csum_search_commit_root = bbio->csum_search_commit_root;
