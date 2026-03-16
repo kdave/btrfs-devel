@@ -1047,29 +1047,23 @@ static void btrfs_trans_release_metadata(struct btrfs_trans_handle *trans)
 		return;
 	}
 
-	if (!trans->bytes_reserved) {
-		ASSERT(trans->delayed_refs_bytes_reserved == 0,
-		       "trans->delayed_refs_bytes_reserved=%llu",
-		       trans->delayed_refs_bytes_reserved);
-		return;
+	if (trans->bytes_reserved) {
+		ASSERT(trans->block_rsv == &fs_info->trans_block_rsv);
+		trace_btrfs_space_reservation(fs_info, "transaction",
+					trans->transid, trans->bytes_reserved, 0);
+		btrfs_block_rsv_release(fs_info, trans->block_rsv,
+					trans->bytes_reserved, NULL);
+		trans->bytes_reserved = 0;
 	}
 
-	ASSERT(trans->block_rsv == &fs_info->trans_block_rsv);
-	trace_btrfs_space_reservation(fs_info, "transaction",
-				      trans->transid, trans->bytes_reserved, 0);
-	btrfs_block_rsv_release(fs_info, trans->block_rsv,
-				trans->bytes_reserved, NULL);
-	trans->bytes_reserved = 0;
-
-	if (!trans->delayed_refs_bytes_reserved)
-		return;
-
-	trace_btrfs_space_reservation(fs_info, "local_delayed_refs_rsv",
-				      trans->transid,
-				      trans->delayed_refs_bytes_reserved, 0);
-	btrfs_block_rsv_release(fs_info, &trans->delayed_rsv,
-				trans->delayed_refs_bytes_reserved, NULL);
-	trans->delayed_refs_bytes_reserved = 0;
+	if (trans->delayed_refs_bytes_reserved) {
+		trace_btrfs_space_reservation(fs_info, "local_delayed_refs_rsv",
+					trans->transid,
+					trans->delayed_refs_bytes_reserved, 0);
+		btrfs_block_rsv_release(fs_info, &trans->delayed_rsv,
+					trans->delayed_refs_bytes_reserved, NULL);
+		trans->delayed_refs_bytes_reserved = 0;
+	}
 }
 
 static int __btrfs_end_transaction(struct btrfs_trans_handle *trans,

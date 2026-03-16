@@ -3,11 +3,13 @@
 #include "messages.h"
 #include "ctree.h"
 #include "delalloc-space.h"
+#include "delayed-ref.h"
 #include "block-rsv.h"
 #include "btrfs_inode.h"
 #include "space-info.h"
 #include "qgroup.h"
 #include "fs.h"
+#include "transaction.h"
 
 /*
  * HOW DOES THIS WORK
@@ -247,6 +249,35 @@ static void btrfs_inode_rsv_release(struct btrfs_inode *inode, bool qgroup_free)
 						   qgroup_to_release);
 }
 
+/*
+ * Each delalloc extent could become an ordered_extent and end up inserting a
+ * new data extent and modify a number of btrees. Each of those is associated with
+ * adding delayed refs which need a corresponding delayed refs reservation.
+ *
+ * Each metadata cow operation results in an add and a drop delayed ref, both of
+ * which call add_delayed_ref() and ultimately btrfs_update_delayed_refs_rsv(),
+ * so each must account for 2 delayed refs.
+ */
+static u64 delalloc_calc_delayed_refs_rsv(const struct btrfs_inode *inode, u64 nr_extents)
+{
+	const struct btrfs_fs_info *fs_info = inode->root->fs_info;
+	/*
+	 * Factor for how many delayed refs updates we will generate per extent.
+	 * Non-optional: extent tree, subvolume tree
+	 */
+	int factor = 4;
+
+	/* The remaining trees are only written to conditionally. */
+	if (!(inode->flags & BTRFS_INODE_NODATASUM))
+		factor += 2;
+	if (btrfs_test_opt(fs_info, FREE_SPACE_TREE))
+		factor += 2;
+	if (btrfs_fs_incompat(fs_info, RAID_STRIPE_TREE))
+		factor += 2;
+
+	return btrfs_calc_insert_metadata_size(fs_info, nr_extents) * factor;
+}
+
 static void btrfs_calculate_inode_block_rsv_size(struct btrfs_fs_info *fs_info,
 						 struct btrfs_inode *inode)
 {
@@ -266,6 +297,7 @@ static void btrfs_calculate_inode_block_rsv_size(struct btrfs_fs_info *fs_info,
 		reserve_size = btrfs_calc_insert_metadata_size(fs_info,
 						outstanding_extents);
 		reserve_size += btrfs_calc_metadata_size(fs_info, 1);
+		reserve_size += delalloc_calc_delayed_refs_rsv(inode, outstanding_extents);
 	}
 	if (!(inode->flags & BTRFS_INODE_NODATASUM)) {
 		u64 csum_leaves;
@@ -309,7 +341,27 @@ static void calc_inode_reservations(struct btrfs_inode *inode,
 	 * for an inode update.
 	 */
 	*meta_reserve += inode_update;
+
+	*meta_reserve += delalloc_calc_delayed_refs_rsv(inode, nr_extents);
+
 	*qgroup_reserve = nr_extents * fs_info->nodesize;
+}
+
+void btrfs_delalloc_migrate_delayed_refs_rsv(struct btrfs_trans_handle *trans,
+					     struct btrfs_inode *inode)
+{
+       struct btrfs_block_rsv *inode_rsv = &inode->block_rsv;
+       struct btrfs_block_rsv *trans_rsv = &trans->delayed_rsv;
+       u64 num_bytes = delalloc_calc_delayed_refs_rsv(inode, 1);
+
+       spin_lock(&inode_rsv->lock);
+       num_bytes = min(num_bytes, inode_rsv->reserved);
+       inode_rsv->reserved -= num_bytes;
+       inode_rsv->full = (inode_rsv->reserved >= inode_rsv->size);
+       spin_unlock(&inode_rsv->lock);
+
+       btrfs_block_rsv_add_bytes(trans_rsv, num_bytes, true);
+       trans->delayed_refs_bytes_reserved += num_bytes;
 }
 
 int btrfs_delalloc_reserve_metadata(struct btrfs_inode *inode, u64 num_bytes,

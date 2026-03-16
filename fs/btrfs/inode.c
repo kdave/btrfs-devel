@@ -653,6 +653,7 @@ static noinline int __cow_file_range_inline(struct btrfs_inode *inode,
 		goto out;
 	}
 	trans->block_rsv = &inode->block_rsv;
+	btrfs_delalloc_migrate_delayed_refs_rsv(trans, inode);
 
 	drop_args.path = path;
 	drop_args.start = 0;
@@ -3259,6 +3260,7 @@ int btrfs_finish_one_ordered(struct btrfs_ordered_extent *ordered_extent)
 	}
 
 	trans->block_rsv = &inode->block_rsv;
+	btrfs_delalloc_migrate_delayed_refs_rsv(trans, inode);
 
 	ret = btrfs_insert_raid_extent(trans, ordered_extent);
 	if (unlikely(ret)) {
