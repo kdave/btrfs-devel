@@ -725,9 +725,8 @@ static void shrink_delalloc(struct btrfs_space_info *space_info,
 	struct btrfs_trans_handle *trans;
 	u64 delalloc_bytes;
 	u64 ordered_bytes;
-	u64 items;
 	long time_left;
-	int loops;
+	u64 orig_tickets_id;
 
 	delalloc_bytes = percpu_counter_sum_positive(&fs_info->delalloc_bytes);
 	ordered_bytes = percpu_counter_sum_positive(&fs_info->ordered_bytes);
@@ -735,9 +734,7 @@ static void shrink_delalloc(struct btrfs_space_info *space_info,
 		return;
 
 	/* Calc the number of the pages we need flush for space reservation */
-	if (to_reclaim == U64_MAX) {
-		items = U64_MAX;
-	} else {
+	if (to_reclaim != U64_MAX) {
 		/*
 		 * to_reclaim is set to however much metadata we need to
 		 * reclaim, but reclaiming that much data doesn't really track
@@ -751,7 +748,6 @@ static void shrink_delalloc(struct btrfs_space_info *space_info,
 		 * aggressive.
 		 */
 		to_reclaim = max(to_reclaim, delalloc_bytes >> 3);
-		items = calc_reclaim_items_nr(fs_info, to_reclaim) * 2;
 	}
 
 	trans = current->journal_info;
@@ -764,10 +760,14 @@ static void shrink_delalloc(struct btrfs_space_info *space_info,
 	if (ordered_bytes > delalloc_bytes && !for_preempt)
 		wait_ordered = true;
 
-	loops = 0;
-	while ((delalloc_bytes || ordered_bytes) && loops < 3) {
-		u64 temp = min(delalloc_bytes, to_reclaim) >> PAGE_SHIFT;
-		long nr_pages = min_t(u64, temp, LONG_MAX);
+	spin_lock(&space_info->lock);
+	orig_tickets_id = space_info->tickets_id;
+	spin_unlock(&space_info->lock);
+
+	while ((delalloc_bytes || ordered_bytes) && to_reclaim) {
+		u64 iter_reclaim = min_t(u64, to_reclaim, SZ_128M);
+		long nr_pages = min_t(u64, delalloc_bytes, iter_reclaim) >> PAGE_SHIFT;
+		u64 items = calc_reclaim_items_nr(fs_info, iter_reclaim) * 2;
 		int async_pages;
 
 		btrfs_start_delalloc_roots(fs_info, nr_pages, true);
@@ -811,7 +811,7 @@ static void shrink_delalloc(struct btrfs_space_info *space_info,
 			   atomic_read(&fs_info->async_delalloc_pages) <=
 			   async_pages);
 skip_async:
-		loops++;
+		to_reclaim -= iter_reclaim;
 		if (wait_ordered && !trans) {
 			btrfs_wait_ordered_roots(fs_info, items, NULL);
 		} else {
@@ -831,6 +831,15 @@ skip_async:
 		spin_lock(&space_info->lock);
 		if (list_empty(&space_info->tickets) &&
 		    list_empty(&space_info->priority_tickets)) {
+			spin_unlock(&space_info->lock);
+			break;
+		}
+		/*
+		 * If a ticket was satisfied since we started, break out
+		 * so the async reclaim state machine can process delayed
+		 * refs before we flush more delalloc.
+		 */
+		if (space_info->tickets_id != orig_tickets_id) {
 			spin_unlock(&space_info->lock);
 			break;
 		}
