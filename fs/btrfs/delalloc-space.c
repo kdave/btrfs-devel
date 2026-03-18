@@ -65,7 +65,7 @@
  *     This is the number of file extent items we'll need to handle all of the
  *     outstanding DELALLOC space we have in this inode.  We limit the maximum
  *     size of an extent, so a large contiguous dirty area may require more than
- *     one outstanding_extent, which is why count_max_extents() is used to
+ *     one outstanding_extent, which is why we use the max extent size to
  *     determine how many outstanding_extents get added.
  *
  *   ->csum_bytes
@@ -324,7 +324,7 @@ static void calc_inode_reservations(struct btrfs_inode *inode,
 				    u64 *meta_reserve, u64 *qgroup_reserve)
 {
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
-	u64 nr_extents = count_max_extents(fs_info, num_bytes);
+	u64 nr_extents = btrfs_inode_max_extents(inode, num_bytes);
 	u64 csum_leaves;
 	u64 inode_update = btrfs_calc_metadata_size(fs_info, 1);
 
@@ -423,7 +423,7 @@ int btrfs_delalloc_reserve_metadata(struct btrfs_inode *inode, u64 num_bytes,
 	 * racing with an ordered completion or some such that would think it
 	 * needs to free the reservation we just made.
 	 */
-	nr_extents = count_max_extents(fs_info, num_bytes);
+	nr_extents = btrfs_inode_max_extents(inode, num_bytes);
 	spin_lock(&inode->lock);
 	btrfs_mod_outstanding_extents(inode, nr_extents);
 	if (!(inode->flags & BTRFS_INODE_NODATASUM))
@@ -490,7 +490,7 @@ void btrfs_delalloc_release_extents(struct btrfs_inode *inode, u64 num_bytes)
 	unsigned num_extents;
 
 	spin_lock(&inode->lock);
-	num_extents = count_max_extents(fs_info, num_bytes);
+	num_extents = btrfs_inode_max_extents(inode, num_bytes);
 	btrfs_mod_outstanding_extents(inode, -num_extents);
 	btrfs_calculate_inode_block_rsv_size(fs_info, inode);
 	spin_unlock(&inode->lock);
@@ -505,8 +505,8 @@ void btrfs_delalloc_release_extents(struct btrfs_inode *inode, u64 num_bytes)
 void btrfs_delalloc_shrink_extents(struct btrfs_inode *inode, u64 reserved_len, u64 new_len)
 {
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
-	const u32 reserved_num_extents = count_max_extents(fs_info, reserved_len);
-	const u32 new_num_extents = count_max_extents(fs_info, new_len);
+	const u32 reserved_num_extents = btrfs_inode_max_extents(inode, reserved_len);
+	const u32 new_num_extents = btrfs_inode_max_extents(inode, new_len);
 	const int diff_num_extents = new_num_extents - reserved_num_extents;
 
 	ASSERT(new_len <= reserved_len);

@@ -748,6 +748,56 @@ static int add_async_extent(struct async_chunk *cow, u64 start, u64 ram_size,
 }
 
 /*
+ * Check if compression will definitely be attempted for this inode based on
+ * mount options and inode properties.  Unlike inode_need_compress(), this does
+ * NOT run the compression heuristic or check range-specific conditions, so it
+ * is safe to call under locks (e.g. io_tree lock) and for reservation sizing.
+ *
+ * Only returns true for cases where BTRFS_INODE_NOCOMPRESS cannot be set at
+ * runtime (FORCE_COMPRESS and prop_compress), ensuring that the effective max
+ * extent size is stable across paired set/clear delalloc operations.
+ */
+static inline bool inode_may_compress(const struct btrfs_inode *inode)
+{
+	if (!btrfs_inode_can_compress(inode))
+		return false;
+
+	/* Force compress always attempts compression. */
+	if (btrfs_test_opt(inode->root->fs_info, FORCE_COMPRESS))
+		return true;
+
+	/* Per-inode property: NOCOMPRESS cannot override this. */
+	if (inode->prop_compress)
+		return true;
+
+	return false;
+}
+
+/*
+ * Return the effective maximum extent size for reservation accounting.
+ *
+ * When compression is guaranteed to be attempted (FORCE_COMPRESS or
+ * prop_compress), the compression path splits ranges into
+ * BTRFS_MAX_UNCOMPRESSED chunks, each producing an independent ordered
+ * extent.  Use that as the divisor instead of fs_info->max_extent_size
+ * to avoid severely undercounting outstanding extents.
+ */
+static u64 btrfs_inode_max_extent_size(const struct btrfs_inode *inode)
+{
+	if (inode_may_compress(inode))
+		return BTRFS_MAX_UNCOMPRESSED;
+
+	return inode->root->fs_info->max_extent_size;
+}
+
+u64 btrfs_inode_max_extents(const struct btrfs_inode *inode, u64 size)
+{
+	u64 max_extent_size = btrfs_inode_max_extent_size(inode);
+
+	return div_u64(size + max_extent_size - 1, max_extent_size);
+}
+
+/*
  * Check if the inode needs to be submitted to compression, based on mount
  * options, defragmentation, properties or heuristics.
  */
@@ -2459,8 +2509,8 @@ int btrfs_run_delalloc_range(struct btrfs_inode *inode, struct folio *locked_fol
 void btrfs_split_delalloc_extent(struct btrfs_inode *inode,
 				 struct extent_state *orig, u64 split)
 {
-	struct btrfs_fs_info *fs_info = inode->root->fs_info;
 	u64 size;
+	u64 max_extent_size = btrfs_inode_max_extent_size(inode);
 
 	lockdep_assert_held(&inode->io_tree.lock);
 
@@ -2469,8 +2519,8 @@ void btrfs_split_delalloc_extent(struct btrfs_inode *inode,
 		return;
 
 	size = orig->end - orig->start + 1;
-	if (size > fs_info->max_extent_size) {
-		u32 num_extents;
+	if (size > max_extent_size) {
+		u64 num_extents;
 		u64 new_size;
 
 		/*
@@ -2478,10 +2528,10 @@ void btrfs_split_delalloc_extent(struct btrfs_inode *inode,
 		 * applies here, just in reverse.
 		 */
 		new_size = orig->end - split + 1;
-		num_extents = count_max_extents(fs_info, new_size);
+		num_extents = btrfs_inode_max_extents(inode, new_size);
 		new_size = split - orig->start;
-		num_extents += count_max_extents(fs_info, new_size);
-		if (count_max_extents(fs_info, size) >= num_extents)
+		num_extents += btrfs_inode_max_extents(inode, new_size);
+		if (btrfs_inode_max_extents(inode, size) >= num_extents)
 			return;
 	}
 
@@ -2498,9 +2548,9 @@ void btrfs_split_delalloc_extent(struct btrfs_inode *inode,
 void btrfs_merge_delalloc_extent(struct btrfs_inode *inode, struct extent_state *new,
 				 struct extent_state *other)
 {
-	struct btrfs_fs_info *fs_info = inode->root->fs_info;
 	u64 new_size, old_size;
-	u32 num_extents;
+	u64 max_extent_size = btrfs_inode_max_extent_size(inode);
+	u64 num_extents;
 
 	lockdep_assert_held(&inode->io_tree.lock);
 
@@ -2514,7 +2564,7 @@ void btrfs_merge_delalloc_extent(struct btrfs_inode *inode, struct extent_state 
 		new_size = other->end - new->start + 1;
 
 	/* we're not bigger than the max, unreserve the space and go */
-	if (new_size <= fs_info->max_extent_size) {
+	if (new_size <= max_extent_size) {
 		spin_lock(&inode->lock);
 		btrfs_mod_outstanding_extents(inode, -1);
 		spin_unlock(&inode->lock);
@@ -2540,10 +2590,10 @@ void btrfs_merge_delalloc_extent(struct btrfs_inode *inode, struct extent_state 
 	 * this case.
 	 */
 	old_size = other->end - other->start + 1;
-	num_extents = count_max_extents(fs_info, old_size);
+	num_extents = btrfs_inode_max_extents(inode, old_size);
 	old_size = new->end - new->start + 1;
-	num_extents += count_max_extents(fs_info, old_size);
-	if (count_max_extents(fs_info, new_size) >= num_extents)
+	num_extents += btrfs_inode_max_extents(inode, old_size);
+	if (btrfs_inode_max_extents(inode, new_size) >= num_extents)
 		return;
 
 	spin_lock(&inode->lock);
@@ -2616,7 +2666,7 @@ void btrfs_set_delalloc_extent(struct btrfs_inode *inode, struct extent_state *s
 	if (!(state->state & EXTENT_DELALLOC) && (bits & EXTENT_DELALLOC)) {
 		u64 len = state->end + 1 - state->start;
 		u64 prev_delalloc_bytes;
-		u32 num_extents = count_max_extents(fs_info, len);
+		u32 num_extents = btrfs_inode_max_extents(inode, len);
 
 		spin_lock(&inode->lock);
 		btrfs_mod_outstanding_extents(inode, num_extents);
@@ -2662,7 +2712,7 @@ void btrfs_clear_delalloc_extent(struct btrfs_inode *inode,
 {
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
 	u64 len = state->end + 1 - state->start;
-	u32 num_extents = count_max_extents(fs_info, len);
+	u32 num_extents = btrfs_inode_max_extents(inode, len);
 
 	lockdep_assert_held(&inode->io_tree.lock);
 

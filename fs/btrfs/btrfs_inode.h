@@ -510,6 +510,8 @@ static inline bool btrfs_inode_can_compress(const struct btrfs_inode *inode)
 	return true;
 }
 
+u64 btrfs_inode_max_extents(const struct btrfs_inode *inode, u64 size);
+
 static inline void btrfs_assert_inode_locked(struct btrfs_inode *inode)
 {
 	/* Immediately trigger a crash if the inode is not locked. */
