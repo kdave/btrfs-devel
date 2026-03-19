@@ -106,11 +106,16 @@ jobs:
       with:
         annotate_only: true
         report_paths: "/home/runner/xfstests/results/result.xml"
+    - name: Sanitize mask before publishing results
+      if: success() || failure()
+      run: |
+        echo SANITIZED=$(echo "${{ matrix.mask }}" | tr -s "]*/[" '-') >> "$GITHUB_ENV"
+        grep SANITIZED "$GITHUB_ENV"
     - name: Save results as artifacts
       uses: actions/upload-artifact@v6
       if: success() || failure()
       with:
-        name: "results-${{ matrix.mask }}"
+        name: "results-${{ env.SANITIZED }}"
         path: "/home/runner/xfstests/results/"
     - name: Collect not run tests to summary
       if: success() || failure()
