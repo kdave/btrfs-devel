@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
     - name: Host info
       run: |
         uname -a
@@ -112,7 +112,7 @@ jobs:
         echo SANITIZED=$(echo "${{ matrix.mask }}" | tr -s "]*/[" '-') >> "$GITHUB_ENV"
         grep SANITIZED "$GITHUB_ENV"
     - name: Save results as artifacts
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       if: success() || failure()
       with:
         name: "results-${{ env.SANITIZED }}"
