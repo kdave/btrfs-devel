@@ -180,7 +180,7 @@ struct btrfs_inode {
 	 * items we think we'll end up using, and reserved_extents is the number
 	 * of extent items we've reserved metadata for. Protected by 'lock'.
 	 */
-	unsigned outstanding_extents;
+	u64 outstanding_extents;
 
 	/* used to order data wrt metadata */
 	spinlock_t ordered_tree_lock;
@@ -429,14 +429,24 @@ static inline bool is_data_inode(const struct btrfs_inode *inode)
 }
 
 static inline void btrfs_mod_outstanding_extents(struct btrfs_inode *inode,
-						 int mod)
+						 int mod, u64 nr_extents)
 {
+	s64 delta = mod * (s64)nr_extents;
+
 	lockdep_assert_held(&inode->lock);
-	inode->outstanding_extents += mod;
+	ASSERT(mod == 1 || mod == -1, "mod=%d", mod);
+	ASSERT(nr_extents <= S64_MAX, "nr_extents=%llu", nr_extents);
+	ASSERT(mod == -1 || inode->outstanding_extents <= U64_MAX - nr_extents,
+	       "nr_extents=%llu inode->outstanding_extents=%llu",
+	       nr_extents, inode->outstanding_extents);
+	ASSERT(mod == 1 || inode->outstanding_extents >= nr_extents,
+	       "nr_extents=%llu inode->outstanding_extents=%llu",
+	       nr_extents, inode->outstanding_extents);
+	inode->outstanding_extents += delta;
 	if (btrfs_is_free_space_inode(inode))
 		return;
 	trace_btrfs_inode_mod_outstanding_extents(inode->root, btrfs_ino(inode),
-						  mod, inode->outstanding_extents);
+						  delta, inode->outstanding_extents);
 }
 
 /*

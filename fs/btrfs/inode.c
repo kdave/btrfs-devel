@@ -2536,7 +2536,7 @@ void btrfs_split_delalloc_extent(struct btrfs_inode *inode,
 	}
 
 	spin_lock(&inode->lock);
-	btrfs_mod_outstanding_extents(inode, 1);
+	btrfs_mod_outstanding_extents(inode, 1, 1);
 	spin_unlock(&inode->lock);
 }
 
@@ -2566,7 +2566,7 @@ void btrfs_merge_delalloc_extent(struct btrfs_inode *inode, struct extent_state 
 	/* we're not bigger than the max, unreserve the space and go */
 	if (new_size <= max_extent_size) {
 		spin_lock(&inode->lock);
-		btrfs_mod_outstanding_extents(inode, -1);
+		btrfs_mod_outstanding_extents(inode, -1, 1);
 		spin_unlock(&inode->lock);
 		return;
 	}
@@ -2597,7 +2597,7 @@ void btrfs_merge_delalloc_extent(struct btrfs_inode *inode, struct extent_state 
 		return;
 
 	spin_lock(&inode->lock);
-	btrfs_mod_outstanding_extents(inode, -1);
+	btrfs_mod_outstanding_extents(inode, -1, 1);
 	spin_unlock(&inode->lock);
 }
 
@@ -2666,10 +2666,10 @@ void btrfs_set_delalloc_extent(struct btrfs_inode *inode, struct extent_state *s
 	if (!(state->state & EXTENT_DELALLOC) && (bits & EXTENT_DELALLOC)) {
 		u64 len = state->end + 1 - state->start;
 		u64 prev_delalloc_bytes;
-		u32 num_extents = btrfs_inode_max_extents(inode, len);
+		u64 num_extents = btrfs_inode_max_extents(inode, len);
 
 		spin_lock(&inode->lock);
-		btrfs_mod_outstanding_extents(inode, num_extents);
+		btrfs_mod_outstanding_extents(inode, 1, num_extents);
 		spin_unlock(&inode->lock);
 
 		/* For sanity tests */
@@ -2712,7 +2712,7 @@ void btrfs_clear_delalloc_extent(struct btrfs_inode *inode,
 {
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
 	u64 len = state->end + 1 - state->start;
-	u32 num_extents = btrfs_inode_max_extents(inode, len);
+	u64 num_extents = btrfs_inode_max_extents(inode, len);
 
 	lockdep_assert_held(&inode->io_tree.lock);
 
@@ -2732,7 +2732,7 @@ void btrfs_clear_delalloc_extent(struct btrfs_inode *inode,
 		u64 new_delalloc_bytes;
 
 		spin_lock(&inode->lock);
-		btrfs_mod_outstanding_extents(inode, -num_extents);
+		btrfs_mod_outstanding_extents(inode, -1, num_extents);
 		spin_unlock(&inode->lock);
 
 		/*

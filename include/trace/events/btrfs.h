@@ -2003,15 +2003,15 @@ DEFINE_EVENT(btrfs__prelim_ref, btrfs_prelim_ref_insert,
 );
 
 TRACE_EVENT(btrfs_inode_mod_outstanding_extents,
-	TP_PROTO(const struct btrfs_root *root, u64 ino, int mod, unsigned outstanding),
+	TP_PROTO(const struct btrfs_root *root, u64 ino, s64 mod, u64 outstanding),
 
 	TP_ARGS(root, ino, mod, outstanding),
 
 	TP_STRUCT__entry_btrfs(
 		__field(	u64, root_objectid	)
 		__field(	u64, ino		)
-		__field(	int, mod		)
-		__field(	unsigned, outstanding	)
+		__field(	s64, mod		)
+		__field(	u64, outstanding	)
 	),
 
 	TP_fast_assign_btrfs(root->fs_info,
@@ -2021,7 +2021,7 @@ TRACE_EVENT(btrfs_inode_mod_outstanding_extents,
 		__entry->outstanding    = outstanding;
 	),
 
-	TP_printk_btrfs("root=%llu(%s) ino=%llu mod=%d outstanding=%u",
+	TP_printk_btrfs("root=%llu(%s) ino=%llu mod=%lld outstanding=%llu",
 			show_root_type(__entry->root_objectid),
 			__entry->ino, __entry->mod, __entry->outstanding)
 );

@@ -284,7 +284,7 @@ static void btrfs_calculate_inode_block_rsv_size(struct btrfs_fs_info *fs_info,
 	struct btrfs_block_rsv *block_rsv = &inode->block_rsv;
 	u64 reserve_size = 0;
 	u64 qgroup_rsv_size = 0;
-	unsigned outstanding_extents;
+	u64 outstanding_extents;
 
 	lockdep_assert_held(&inode->lock);
 	outstanding_extents = inode->outstanding_extents;
@@ -311,7 +311,7 @@ static void btrfs_calculate_inode_block_rsv_size(struct btrfs_fs_info *fs_info,
 	 *
 	 * This is overestimating in most cases.
 	 */
-	qgroup_rsv_size = (u64)outstanding_extents * fs_info->nodesize;
+	qgroup_rsv_size = outstanding_extents * fs_info->nodesize;
 
 	spin_lock(&block_rsv->lock);
 	block_rsv->size = reserve_size;
@@ -371,7 +371,7 @@ int btrfs_delalloc_reserve_metadata(struct btrfs_inode *inode, u64 num_bytes,
 	struct btrfs_fs_info *fs_info = root->fs_info;
 	struct btrfs_block_rsv *block_rsv = &inode->block_rsv;
 	u64 meta_reserve, qgroup_reserve;
-	unsigned nr_extents;
+	u64 nr_extents;
 	enum btrfs_reserve_flush_enum flush = BTRFS_RESERVE_FLUSH_ALL;
 	int ret = 0;
 
@@ -425,7 +425,7 @@ int btrfs_delalloc_reserve_metadata(struct btrfs_inode *inode, u64 num_bytes,
 	 */
 	nr_extents = btrfs_inode_max_extents(inode, num_bytes);
 	spin_lock(&inode->lock);
-	btrfs_mod_outstanding_extents(inode, nr_extents);
+	btrfs_mod_outstanding_extents(inode, 1, nr_extents);
 	if (!(inode->flags & BTRFS_INODE_NODATASUM))
 		inode->csum_bytes += disk_num_bytes;
 	btrfs_calculate_inode_block_rsv_size(fs_info, inode);
@@ -487,11 +487,11 @@ void btrfs_delalloc_release_metadata(struct btrfs_inode *inode, u64 num_bytes,
 void btrfs_delalloc_release_extents(struct btrfs_inode *inode, u64 num_bytes)
 {
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
-	unsigned num_extents;
+	u64 num_extents;
 
 	spin_lock(&inode->lock);
 	num_extents = btrfs_inode_max_extents(inode, num_bytes);
-	btrfs_mod_outstanding_extents(inode, -num_extents);
+	btrfs_mod_outstanding_extents(inode, -1, num_extents);
 	btrfs_calculate_inode_block_rsv_size(fs_info, inode);
 	spin_unlock(&inode->lock);
 
@@ -505,16 +505,15 @@ void btrfs_delalloc_release_extents(struct btrfs_inode *inode, u64 num_bytes)
 void btrfs_delalloc_shrink_extents(struct btrfs_inode *inode, u64 reserved_len, u64 new_len)
 {
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
-	const u32 reserved_num_extents = btrfs_inode_max_extents(inode, reserved_len);
-	const u32 new_num_extents = btrfs_inode_max_extents(inode, new_len);
-	const int diff_num_extents = new_num_extents - reserved_num_extents;
+	const u64 reserved_num_extents = btrfs_inode_max_extents(inode, reserved_len);
+	const u64 new_num_extents = btrfs_inode_max_extents(inode, new_len);
 
 	ASSERT(new_len <= reserved_len);
 	if (new_num_extents == reserved_num_extents)
 		return;
 
 	spin_lock(&inode->lock);
-	btrfs_mod_outstanding_extents(inode, diff_num_extents);
+	btrfs_mod_outstanding_extents(inode, -1, reserved_num_extents - new_num_extents);
 	btrfs_calculate_inode_block_rsv_size(fs_info, inode);
 	spin_unlock(&inode->lock);
 
