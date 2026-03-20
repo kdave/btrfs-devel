@@ -20,12 +20,10 @@ jobs:
         path: "/home/runner/build"
         key: kernel-build
     - name: Build kernel (optional)
+      if: steps.cache-build.outputs.cache-hit != 'true'
       run: |
         mkdir -p /home/runner/build
         ls -lR $HOME/build
-        exit 1
         vng --verbose --kconfig O=$HOME/build
-        make localmodconfig
-        cat .github/workflows/kconfig.btrfs .github/workflows/kconfig.fstests >> .config
-        yes '' | make oldconfig
         make -j 4 O=$HOME/build kernel/
+        ls -lR $HOME/build
