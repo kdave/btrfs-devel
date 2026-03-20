@@ -28,7 +28,7 @@ jobs:
         export KBUILD_OUTPUT=/home/runner/build
         vng --verbose --kconfig -- O=/home/runner/build
     - name: Build kernel (again)
-      ruN: |
+      run: |
         set -x
         mkdir -p /home/runner/build
         export KBUILD_OUTPUT=/home/runner/build
