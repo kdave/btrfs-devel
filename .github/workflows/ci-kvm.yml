@@ -23,10 +23,11 @@ jobs:
       if: steps.cache-build.outputs.cache-hit != 'true'
       run: |
         set -x
+        vng --version
         mkdir -p /home/runner/build
         ls -laR /home/runner/build
         make ARCH=x86 mrproper
         git clean -dfx
-        vng --verbose --kconfig O=/home/runner/build
+        vng --verbose --kconfig -- O=/home/runner/build
         #make -j 4 O=/home/runner/build kernel/
         #ls -laR /home/runner/build
