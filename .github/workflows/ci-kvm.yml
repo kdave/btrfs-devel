@@ -26,7 +26,7 @@ jobs:
         ls -la
         mkdir -p /home/runner/build
         ls -laR /home/runner/build
-        make mrproper
+        make ARCH=x86 mrproper
         ls -la
         vng --verbose --kconfig O=/home/runner/build
         make -j 4 O=/home/runner/build kernel/
