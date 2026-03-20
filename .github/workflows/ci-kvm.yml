@@ -22,6 +22,8 @@ jobs:
     - name: Build kernel (optional)
       if: steps.cache-build.outputs.cache-hit != 'true'
       run: |
+        set -x
+        ls -l
         mkdir -p /home/runner/build
         ls -lR /home/runner/build
         vng --verbose --kconfig O=/home/runner/build
