@@ -11,8 +11,40 @@ on:
     branches: [ "ci-kvm**" ]
 
 jobs:
-  build:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Update package cache
+      run: sudo apt-get update -y
+    - name: Install build and runtime dependencies
+      run: sudo apt-get install -y bc gawk gcc git indent make sed flex bison libelf-dev udev ccache virtme-ng
+    - name: Set up ccache environment
+      run: |
+        echo "PATH=/usr/lib64/ccache:/usr/lib/ccache:$PATH" >> "$GITHUB_ENV"
+        echo "CCACHE_DIR=/home/runner/ccache" >> "$GITHUB_ENV"
+        echo "CACHETAG=$(make kernelversion)" >> "$GITHUB_ENV"
+    - run: ccache -s
+    - name: Restore build ccache
+      uses: actions/cache@v5
+      with:
+        save-always: true
+        path: "/home/runner/ccache"
+        key: kernel-build-ccache-${{ env.CACHETAG }}
+    - name: Build kernel for virtme
+      run: |
+        vng --verbose --kconfig --config .github/workflows/kconfig.btrfs --config .github/workflows/kconfig.fstests
+        #make localmodconfig
+        cat .github/workflows/kconfig.btrfs .github/workflows/kconfig.fstests >> .config
+        make olddefconfig
+        vng --verbose --build
+    - run: ccache -s
+    - name: Test boot of built kernel
+      run: sudo vng -- uname -a
+
+  build-and-test:
     if: github.ref != 'refs/heads/ci-kvm'
+    needs: setup
     strategy:
       matrix:
         mask: [ "btrfs/[0-9]*", "generic/[0-3]*", "generic/[4-9]*" ]
@@ -36,14 +68,26 @@ jobs:
     - name: Update package cache
       run: sudo apt-get update -y
     - name: Install build and runtime dependencies
-      run: sudo apt-get install -y bc gawk gcc git indent make sed flex bison libelf-dev udev virtme-ng
+      run: sudo apt-get install -y bc gawk gcc git indent make sed flex bison libelf-dev udev ccache virtme-ng
+    - name: Set up ccache environment
+      run: |
+        echo "PATH=/usr/lib64/ccache:/usr/lib/ccache:$PATH" >> "$GITHUB_ENV"
+        echo "CCACHE_DIR=/home/runner/ccache" >> "$GITHUB_ENV"
+        echo "CACHETAG=$(make kernelversion)" >> "$GITHUB_ENV"
+    - run: ccache -s
+    - name: Restore build ccache
+      uses: actions/cache@v5
+      with:
+        save-always: true
+        path: "/home/runner/ccache"
+        key: kernel-build-ccache-${{ env.CACHETAG }}
     - name: Setup KVM and virtme
       # Check version and that it can actually run on the host VM
       run: |
         sudo chmod 0644 /boot/vmlinuz-*
         sudo chmod 0666 /dev/kvm
-        vng --version
-        sudo vng --verbose -r -- uname -a
+        #vng --version
+        #sudo vng --verbose -r -- uname -a
     # Pass the configs for initial setup and then again if localmod drops some something
     - name: Build kernel for virtme
       run: |
@@ -97,6 +141,7 @@ jobs:
     # - memory 4GiB
     # - cpus all from host (usually 4)
     - name: "Start fstests in VM: ${{ matrix.mask }}"
+      if: matrix.type == 'normal'
       run: |
         sudo vng --memory 4096 --rw \
         --disk disk1 --disk disk2 --disk disk3 --disk disk4 --disk disk5 \
@@ -107,6 +152,7 @@ jobs:
          env --default-signal=PIPE ./check -R xunit -b -T ${{ matrix.mask }}; \
          echo FSTESTS FINISHED"
     - name: "Start fstests in VM (zoned): ${{ matrix.group }}"
+      if: matrix.type == 'zoned'
       run: |
         vng --rw \
         -o=-device -o=nvme,id=nvme0,serial=deadbeef     \
