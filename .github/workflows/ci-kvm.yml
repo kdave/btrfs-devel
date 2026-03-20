@@ -1,92 +1,30 @@
-# CI with KVM virtualization on GH actions infra (slow, low storage, 6h timeout)
-# - virualization provided by virtme
-# - only x86_64, ARM virtualization not available
-
-name: CI KVM
+name: CI KVM test caching
 
 on:
   push:
-    branches: [ "ci-kvm-**" ]
+    branches: [ "ci-kvm-caching" ]
 
 jobs:
   build:
-    strategy:
-      matrix:
-        group: [ "-g quick", "-g dedupe" ]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Host info
-      run: |
-        uname -a
-        lscpu
-        free -m
-        df -h /
-        lsblk
     - name: Update package cache
       run: sudo apt-get update -y
     - name: Install build and runtime dependencies
       run: sudo apt-get install -y bc gawk gcc git indent make sed flex bison libelf-dev udev virtme-ng
-    - name: Setup KVM and virtme
-      # Check version and that it can actually run on the host VM
+    - name: Restore build cache
+      id: cache-build
+      uses: actions/cache@v5
+      with:
+        path: "/home/runner/build"
+        key: kernel-build
+    - name: Build kernel (optional)
       run: |
-        sudo chmod 0644 /boot/vmlinuz-*
-        sudo chmod 0666 /dev/kvm
-        vng --version
-        sudo vng --verbose -r -- uname -a
-    # Pass the configs for initial setup and then again if localmod drops some something
-    - name: Build kernel for virtme
-      run: |
-        vng --verbose --kconfig --config .github/workflows/kconfig.btrfs --config .github/workflows/kconfig.fstests
+        ls -lR $HOME/build
+        exit 1
+        vng --verbose --kconfig O=$HOME/build
         make localmodconfig
         cat .github/workflows/kconfig.btrfs .github/workflows/kconfig.fstests >> .config
         yes '' | make oldconfig
-        vng --verbose --build
-    - name: Test boot of built kernel
-      run: sudo vng -- uname -a
-    # Note: post-update could drop permissions from /dev/kvm
-    - name: Install dependencies for fstests
-      run: |
-        sudo apt-get install -y acl attr autoconf automake bc dbench dump e2fsprogs fio gawk \
-            gcc git indent libacl1-dev libaio-dev libcap-dev libgdbm-dev libtool \
-            libtool-bin liburing-dev libuuid1 lvm2 make psmisc python3 quota sed \
-            uuid-dev uuid-runtime xfsprogs linux-headers-$(uname -r) sqlite3 libgdbm-compat-dev \
-            xfsdump xfslibs-dev btrfs-progs pkg-config
-        sudo chmod 0666 /dev/kvm
-    - name: Build fstests
-      run: |
-        git clone --depth 1 -b local https://github.com/kdave/xfstests $HOME/xfstests
-        pushd $HOME/xfstests
-        autoreconf -vfi
-        ./configure
-        make -j$(nproc)
-        popd
-
-    # Tests
-    - name: Setup fstests environment
-      run: |
-        truncate -s 12g disk{1..9}
-        mkfs.btrfs disk1
-        pushd $HOME/xfstests
-        sudo useradd fsgqa
-        sudo useradd fsgqa2
-        sudo useradd 123456-fsgqa
-        sudo mkdir /mnt/test
-        sudo mkdir /mnt/scratch
-        echo TEST_DEV=/dev/vda >> local.config
-        echo TEST_DIR=/mnt/test >> local.config
-        echo SCRATCH_DEV_POOL="'/dev/vdb /dev/vdc /dev/vdd /dev/vde /dev/vdf /dev/vdg /dev/vdh /dev/vdi'" >> local.config
-        echo LOGWRITES_DEV=/dev/vdi >> local.config
-        echo SCRATCH_MNT=/mnt/scratch >> local.config
-        echo FSTYP=btrfs >> local.config
-        echo MKFS_OPTIONS="'-K -f'" >> local.config
-        echo MOUNT_OPTIONS= >> local.config
-        popd
-    # With --rw we have full access to the host
-    - name: "Start fstests in VM: ${{ matrix.group }}"
-      run: |
-        vng --rw \
-        --disk disk1 --disk disk2 --disk disk3 --disk disk4 --disk disk5 \
-        --disk disk6 --disk disk7 --disk disk8 --disk disk9 \
-        --user root --network user -- \
-        "cd $HOME/xfstests; lscpu; free -m; cat /proc/partitions; cat local.config; env --default-signal=PIPE ./check -b -T ${{ matrix.group }}"
+        make -j 4 O=$HOME/build kernel/
