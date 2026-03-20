@@ -28,5 +28,5 @@ jobs:
         ls -laR /home/runner/build
         export KBUILD_OUTPUT=/home/runner/build
         vng --verbose --kconfig -- O=/home/runner/build
-        #make -j 4 O=/home/runner/build kernel/
-        #ls -laR /home/runner/build
+        make -j 4 O=/home/runner/build kernel/
+        ls -laR /home/runner/build
