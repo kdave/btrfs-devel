@@ -23,10 +23,13 @@ jobs:
       if: steps.cache-build.outputs.cache-hit != 'true'
       run: |
         set -x
-        vng --version
         mkdir -p /home/runner/build
         ls -laR /home/runner/build
         export KBUILD_OUTPUT=/home/runner/build
         vng --verbose --kconfig -- O=/home/runner/build
+    - name: Build kernel (again)
+      ruN: |
+        set -x
+        mkdir -p /home/runner/build
+        export KBUILD_OUTPUT=/home/runner/build
         make -j 4 O=/home/runner/build kernel/
-        ls -laR /home/runner/build
