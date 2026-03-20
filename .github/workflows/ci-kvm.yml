@@ -12,24 +12,21 @@ jobs:
     - name: Update package cache
       run: sudo apt-get update -y
     - name: Install build and runtime dependencies
-      run: sudo apt-get install -y bc gawk gcc git indent make sed flex bison libelf-dev udev virtme-ng
-    - name: Restore build cache
-      id: cache-build
+      run: sudo apt-get install -y bc gawk gcc git indent make sed flex bison libelf-dev udev ccache virtme-ng
+    - run: echo "PATH=/usr/lib64/ccache:/usr/lib/ccache:$PATH" >> "$GITHUB_ENV"
+    - run: echo "CCACHE_DIR=/home/runner/ccache" >> "$GITHUB_ENV"
+    - run: ccache -s
+    - name: Restore build ccache
+      id: ccache-build
       uses: actions/cache@v5
       with:
-        path: "/home/runner/build"
-        key: kernel-build
-    - name: Build kernel (optional)
-      if: steps.cache-build.outputs.cache-hit != 'true'
-      run: |
+        path: "/home/runner/ccache"
+        key: kernel-build-ccache
+    - run: ccache -s
+    - run: type -p gcc
+    - name: Build kernel
         set -x
-        mkdir -p /home/runner/build
-        ls -laR /home/runner/build
-        export KBUILD_OUTPUT=/home/runner/build
-        vng --verbose --kconfig -- O=/home/runner/build
-    - name: Build kernel (again)
-      run: |
-        set -x
-        mkdir -p /home/runner/build
-        export KBUILD_OUTPUT=/home/runner/build
-        make -j 4 O=/home/runner/build kernel/
+        ccache -s
+        vng --verbose --kconfig
+        make -j 4 kernel/
+        ccache -s
