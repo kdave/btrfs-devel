@@ -3296,8 +3296,11 @@ int btrfs_scrub_progress(struct btrfs_fs_info *fs_info, u64 devid,
 	if (dev) {
 		mutex_lock(&fs_info->scrub_lock);
 		sctx = dev->scrub_ctx;
-		if (sctx)
+		if (sctx) {
+			spin_lock(&sctx->stat_lock);
 			memcpy(progress, &sctx->stat, sizeof(*progress));
+			spin_unlock(&sctx->stat_lock);
+		}
 		mutex_unlock(&fs_info->scrub_lock);
 	}
 	mutex_unlock(&fs_info->fs_devices->device_list_mutex);
