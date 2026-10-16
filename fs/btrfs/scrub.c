@@ -3293,10 +3293,13 @@ int btrfs_scrub_progress(struct btrfs_fs_info *fs_info, u64 devid,
 
 	mutex_lock(&fs_info->fs_devices->device_list_mutex);
 	dev = btrfs_find_device(fs_info->fs_devices, &args);
-	if (dev)
+	if (dev) {
+		mutex_lock(&fs_info->scrub_lock);
 		sctx = dev->scrub_ctx;
-	if (sctx)
-		memcpy(progress, &sctx->stat, sizeof(*progress));
+		if (sctx)
+			memcpy(progress, &sctx->stat, sizeof(*progress));
+		mutex_unlock(&fs_info->scrub_lock);
+	}
 	mutex_unlock(&fs_info->fs_devices->device_list_mutex);
 
 	return dev ? (sctx ? 0 : -ENOTCONN) : -ENODEV;
