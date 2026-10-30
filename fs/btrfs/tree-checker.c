@@ -108,13 +108,14 @@ static void file_extent_err(const struct extent_buffer *eb, int slot,
  */
 #define CHECK_FE_ALIGNED(leaf, slot, fi, name, alignment)		      \
 ({									      \
-	if (unlikely(!IS_ALIGNED(btrfs_file_extent_##name((leaf), (fi)),      \
-				 (alignment))))				      \
+	const u64 val = btrfs_file_extent_##name((leaf), (fi));               \
+	const bool not_aligned = !IS_ALIGNED(val, (alignment));		      \
+									      \
+	if (unlikely(not_aligned))			      		      \
 		file_extent_err((leaf), (slot),				      \
 	"invalid %s for file extent, have %llu, should be aligned to %u",     \
-			(#name), btrfs_file_extent_##name((leaf), (fi)),      \
-			(alignment));					      \
-	(!IS_ALIGNED(btrfs_file_extent_##name((leaf), (fi)), (alignment)));   \
+			(#name), val, (alignment));			      \
+	not_aligned;			                                      \
 })
 
 static u64 file_extent_end(struct extent_buffer *leaf,
@@ -163,6 +164,12 @@ static void dir_item_err(const struct extent_buffer *eb, int slot,
 	va_end(args);
 }
 
+/* Record info for the last hit inode. */
+struct saved_inode_info {
+	u64 ino;
+	u32 mode;
+};
+
 /*
  * This functions checks prev_key->objectid, to ensure current key and prev_key
  * share the same objectid as inode number.
@@ -204,15 +211,41 @@ static bool check_prev_ino(struct extent_buffer *leaf,
 		prev_key->objectid, key->objectid);
 	return false;
 }
+
+static bool can_have_extent_data(struct extent_buffer *leaf,
+				 struct btrfs_key *key, int slot, u8 fi_type,
+				 const struct saved_inode_info *inode_info)
+{
+	/* No inode item in this leaf. */
+	if (inode_info->ino != key->objectid)
+		return true;
+	if (S_ISREG(inode_info->mode))
+		return true;
+	if (S_ISLNK(inode_info->mode)) {
+		/* For a symlink, the file extent item should always be inlined. */
+		if (unlikely(fi_type != BTRFS_FILE_EXTENT_INLINE))
+			return false;
+		return true;
+	}
+
+	/*
+	 * The rest are special files, e.g. block/FIFO files, which cannot
+	 * have any file extent.
+	 */
+	return false;
+}
+
 static int check_extent_data_item(struct extent_buffer *leaf,
 				  struct btrfs_key *key, int slot,
-				  struct btrfs_key *prev_key)
+				  struct btrfs_key *prev_key,
+				  const struct saved_inode_info *inode_info)
 {
 	struct btrfs_fs_info *fs_info = leaf->fs_info;
 	struct btrfs_file_extent_item *fi;
 	u32 sectorsize = fs_info->sectorsize;
 	u32 item_size = btrfs_item_size(leaf, slot);
 	u64 extent_end;
+	u8 fi_type;
 
 	if (unlikely(!IS_ALIGNED(key->offset, sectorsize))) {
 		file_extent_err(leaf, slot,
@@ -243,12 +276,18 @@ static int check_extent_data_item(struct extent_buffer *leaf,
 				SZ_4K);
 		return -EUCLEAN;
 	}
-	if (unlikely(btrfs_file_extent_type(leaf, fi) >=
-		     BTRFS_NR_FILE_EXTENT_TYPES)) {
+	fi_type = btrfs_file_extent_type(leaf, fi);
+	if (unlikely(fi_type >= BTRFS_NR_FILE_EXTENT_TYPES)) {
 		file_extent_err(leaf, slot,
 		"invalid type for file extent, have %u expect range [0, %u]",
-			btrfs_file_extent_type(leaf, fi),
-			BTRFS_NR_FILE_EXTENT_TYPES - 1);
+			fi_type, BTRFS_NR_FILE_EXTENT_TYPES - 1);
+		return -EUCLEAN;
+	}
+
+	if (unlikely(!can_have_extent_data(leaf, key, slot, fi_type, inode_info))) {
+		file_extent_err(leaf, slot,
+				"unexpected file extent item type %u for inode mode 0%o",
+				fi_type, inode_info->mode);
 		return -EUCLEAN;
 	}
 
@@ -270,7 +309,8 @@ static int check_extent_data_item(struct extent_buffer *leaf,
 			btrfs_file_extent_encryption(leaf, fi));
 		return -EUCLEAN;
 	}
-	if (btrfs_file_extent_type(leaf, fi) == BTRFS_FILE_EXTENT_INLINE) {
+
+	if (fi_type == BTRFS_FILE_EXTENT_INLINE) {
 		/* Inline extent must have 0 as key offset */
 		if (unlikely(key->offset)) {
 			file_extent_err(leaf, slot,
@@ -1004,24 +1044,37 @@ int btrfs_check_chunk_valid(const struct btrfs_fs_info *fs_info,
 			  logical, length);
 		return -EUCLEAN;
 	}
-	if (unlikely(!is_power_of_2(stripe_len) || stripe_len != BTRFS_STRIPE_LEN)) {
+
+	/*
+	 * For now the "stripe_len != BTRFS_STRIPE_LEN" will cover all cases,
+	 * but the power_of_2 and stripe_len >= sectorsize and
+	 * stripe_len <= BTRFS_STRIPE_LEN are the requirements for future
+	 * stripe_len support.
+	 *
+	 * In the future, "stripe_len != BTRFS_STRIPE_LEN" will be removed.
+	 */
+	if (unlikely(stripe_len != BTRFS_STRIPE_LEN ||
+		     !is_power_of_2(stripe_len) || stripe_len < sectorsize ||
+		     stripe_len > BTRFS_STRIPE_LEN)) {
 		chunk_err(fs_info, leaf, chunk, logical,
 			  "invalid chunk stripe length: %llu",
 			  stripe_len);
 		return -EUCLEAN;
 	}
 	/*
-	 * We artificially limit the chunk size, so that the number of stripes
-	 * inside a chunk can be fit into a U32.  The current limit (256G) is
-	 * way too large for real world usage anyway, and it's also much larger
-	 * than our existing limit (10G).
+	 * We artificially limit the chunk size, the current limit is 10G.
 	 *
-	 * Thus it should be a good way to catch obvious bitflips.
+	 * But we don't want to follow that 10G limit too strict, as if we
+	 * relax the requirement one day, we will need a dedicated flag to
+	 * prevent rejecting such new chunks.
+	 *
+	 * Here use 256G as a sane threshold, which should be large enough
+	 * and also a good way to catch obvious bitflips.
 	 */
-	if (unlikely(length >= btrfs_stripe_nr_to_offset(U32_MAX))) {
+	if (unlikely(length > SZ_256G)) {
 		chunk_err(fs_info, leaf, chunk, logical,
 			  "chunk length too large: have %llu limit %llu",
-			  length, btrfs_stripe_nr_to_offset(U32_MAX));
+			  length, SZ_256G);
 		return -EUCLEAN;
 	}
 	if (unlikely(type & ~BTRFS_BLOCK_GROUP_VALID)) {
@@ -1081,9 +1134,9 @@ int btrfs_check_chunk_valid(const struct btrfs_fs_info *fs_info,
 		return -EUCLEAN;
 	}
 
-	if (!remapped &&
-	    !valid_stripe_count(type & BTRFS_BLOCK_GROUP_PROFILE_MASK,
-				num_stripes, sub_stripes)) {
+	if (unlikely(!remapped &&
+		     !valid_stripe_count(type & BTRFS_BLOCK_GROUP_PROFILE_MASK,
+					 num_stripes, sub_stripes))) {
 		chunk_err(fs_info, leaf, chunk, logical,
 			"invalid num_stripes:sub_stripes %u:%u for profile %llu",
 			num_stripes, sub_stripes,
@@ -1206,7 +1259,8 @@ static int check_dev_item(struct extent_buffer *leaf,
 }
 
 static int check_inode_item(struct extent_buffer *leaf,
-			    struct btrfs_key *key, int slot)
+			    struct btrfs_key *key, int slot,
+			    struct saved_inode_info *inode_info)
 {
 	struct btrfs_fs_info *fs_info = leaf->fs_info;
 	struct btrfs_inode_item *iitem;
@@ -1291,6 +1345,8 @@ static int check_inode_item(struct extent_buffer *leaf,
 			ro_flags);
 		return -EUCLEAN;
 	}
+	inode_info->ino = key->objectid;
+	inode_info->mode = mode;
 	return 0;
 }
 
@@ -2348,14 +2404,15 @@ static int check_free_space_bitmap(struct extent_buffer *leaf,
 static enum btrfs_tree_block_status check_leaf_item(struct extent_buffer *leaf,
 						    struct btrfs_key *key,
 						    int slot,
-						    struct btrfs_key *prev_key)
+						    struct btrfs_key *prev_key,
+						    struct saved_inode_info *inode_info)
 {
 	int ret = 0;
 	struct btrfs_chunk *chunk;
 
 	switch (key->type) {
 	case BTRFS_EXTENT_DATA_KEY:
-		ret = check_extent_data_item(leaf, key, slot, prev_key);
+		ret = check_extent_data_item(leaf, key, slot, prev_key, inode_info);
 		break;
 	case BTRFS_EXTENT_CSUM_KEY:
 		ret = check_csum_item(leaf, key, slot, prev_key);
@@ -2385,7 +2442,7 @@ static enum btrfs_tree_block_status check_leaf_item(struct extent_buffer *leaf,
 		ret = check_dev_extent_item(leaf, key, slot, prev_key);
 		break;
 	case BTRFS_INODE_ITEM_KEY:
-		ret = check_inode_item(leaf, key, slot);
+		ret = check_inode_item(leaf, key, slot, inode_info);
 		break;
 	case BTRFS_ROOT_ITEM_KEY:
 		ret = check_root_item(leaf, key, slot);
@@ -2433,6 +2490,7 @@ static enum btrfs_tree_block_status check_leaf_item(struct extent_buffer *leaf,
 enum btrfs_tree_block_status __btrfs_check_leaf(struct extent_buffer *leaf)
 {
 	struct btrfs_fs_info *fs_info = leaf->fs_info;
+	struct saved_inode_info inode_info = { 0 };
 	/* No valid key type is 0, so all key should be larger than this key */
 	struct btrfs_key prev_key = {0, 0, 0};
 	struct btrfs_key key;
@@ -2568,7 +2626,7 @@ enum btrfs_tree_block_status __btrfs_check_leaf(struct extent_buffer *leaf)
 		}
 
 		/* Check if the item size and content meet other criteria. */
-		ret = check_leaf_item(leaf, &key, slot, &prev_key);
+		ret = check_leaf_item(leaf, &key, slot, &prev_key, &inode_info);
 		if (unlikely(ret != BTRFS_TREE_BLOCK_CLEAN))
 			return ret;
 

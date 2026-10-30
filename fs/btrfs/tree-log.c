@@ -30,6 +30,8 @@
 #include "print-tree.h"
 #include "tree-checker.h"
 #include "delayed-inode.h"
+#include "volumes.h"
+#include "raid-stripe-tree.h"
 
 #define MAX_CONFLICT_INODES 10
 
@@ -503,7 +505,7 @@ static int overwrite_item(struct walk_control *wc)
 			btrfs_release_path(wc->subvol_path);
 			return 0;
 		}
-		src_copy = kmalloc(item_size, GFP_NOFS);
+		src_copy = kvmalloc(item_size, GFP_NOFS);
 		if (!src_copy) {
 			btrfs_abort_log_replay(wc, -ENOMEM,
 			       "failed to allocate memory for log leaf item");
@@ -514,7 +516,7 @@ static int overwrite_item(struct walk_control *wc)
 		dst_ptr = btrfs_item_ptr_offset(dst_eb, dst_slot);
 		ret = memcmp_extent_buffer(dst_eb, src_copy, dst_ptr, item_size);
 
-		kfree(src_copy);
+		kvfree(src_copy);
 		/*
 		 * they have the same contents, just return, this saves
 		 * us from cowing blocks in the destination tree and doing
@@ -1683,7 +1685,7 @@ static noinline int add_inode_ref(struct walk_control *wc)
 			}
 
 			/* insert our name */
-			ret = btrfs_add_link(trans, dir, inode, &name, false, ref_index);
+			ret = btrfs_add_link(trans, dir, inode, &name, false, ref_index, NULL);
 			if (ret) {
 				btrfs_abort_log_replay(wc, ret,
 "failed to add link for inode %llu in dir %llu ref_index %llu name %.*s root %llu",
@@ -2031,7 +2033,7 @@ static noinline int insert_one_name(struct btrfs_trans_handle *trans,
 		return PTR_ERR(dir);
 	}
 
-	ret = btrfs_add_link(trans, dir, inode, name, true, index);
+	ret = btrfs_add_link(trans, dir, inode, name, true, index, NULL);
 
 	/* FIXME, put inode into FIXUP list */
 
@@ -4741,6 +4743,24 @@ static int log_csums(struct btrfs_trans_handle *trans,
 	return ret;
 }
 
+static bool log_extent_needs_stripe_tree(struct btrfs_fs_info *fs_info,
+					 u64 disk_bytenr)
+{
+	struct btrfs_chunk_map *map __free(btrfs_free_chunk_map) = NULL;
+
+	if (!btrfs_fs_incompat(fs_info, RAID_STRIPE_TREE))
+		return false;
+
+	if (disk_bytenr == 0 || disk_bytenr >= EXTENT_MAP_LAST_BYTE)
+		return false;
+
+	map = btrfs_find_chunk_map(fs_info, disk_bytenr, 1);
+	if (!map)
+		return false;
+
+	return btrfs_need_stripe_tree_update(fs_info, map->type);
+}
+
 static noinline int copy_items(struct btrfs_trans_handle *trans,
 			       struct btrfs_inode *inode,
 			       struct btrfs_path *dst_path,
@@ -4846,6 +4866,14 @@ static noinline int copy_items(struct btrfs_trans_handle *trans,
 		    ins_keys[dst_index].offset < i_size &&
 		    inode->last_reflink_trans < trans->transid)
 			continue;
+
+		if (!is_old_extent &&
+		    btrfs_file_extent_type(src, extent) != BTRFS_FILE_EXTENT_INLINE) {
+			u64 bytenr = btrfs_file_extent_disk_bytenr(src, extent);
+
+			if (log_extent_needs_stripe_tree(trans->fs_info, bytenr))
+				return BTRFS_LOG_FORCE_COMMIT;
+		}
 
 		if (skip_csum)
 			goto add_to_batch;
@@ -5124,6 +5152,9 @@ static int log_one_extent(struct btrfs_trans_handle *trans,
 	u64 block_len;
 	int ret;
 
+	if (log_extent_needs_stripe_tree(inode->root->fs_info, em->disk_bytenr))
+		return BTRFS_LOG_FORCE_COMMIT;
+
 	btrfs_set_stack_file_extent_generation(&fi, trans->transid);
 	if (em->flags & EXTENT_FLAG_PREALLOC)
 		btrfs_set_stack_file_extent_type(&fi, BTRFS_FILE_EXTENT_PREALLOC);
@@ -5350,7 +5381,7 @@ static int btrfs_log_changed_extents(struct btrfs_trans_handle *trans,
 		 * have a bunch of extents we just want to commit since it will
 		 * be faster.
 		 */
-		if (++num > 32768) {
+		if (++num > SZ_16K) {
 			list_del_init(&tree->modified_extents);
 			ret = -EFBIG;
 			goto process;
@@ -5368,7 +5399,6 @@ static int btrfs_log_changed_extents(struct btrfs_trans_handle *trans,
 		refcount_inc(&em->refs);
 		em->flags |= EXTENT_FLAG_LOGGING;
 		list_add_tail(&em->list, &extents);
-		num++;
 	}
 
 	list_sort(NULL, &extents, extent_cmp);

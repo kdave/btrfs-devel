@@ -49,7 +49,7 @@ void zlib_free_workspace(struct list_head *ws)
 	struct workspace *workspace = list_entry(ws, struct workspace, list);
 
 	kvfree(workspace->strm.workspace);
-	kfree(workspace->buf);
+	kvfree(workspace->buf);
 	kfree(workspace);
 }
 
@@ -84,13 +84,13 @@ struct list_head *zlib_alloc_workspace(struct btrfs_fs_info *fs_info, unsigned i
 	workspace->level = level;
 	workspace->buf = NULL;
 	if (need_special_buffer(fs_info)) {
-		workspace->buf = kmalloc(ZLIB_DFLTCC_BUF_SIZE,
-					 __GFP_NOMEMALLOC | __GFP_NORETRY |
-					 __GFP_NOWARN | GFP_NOIO);
+		workspace->buf = kvmalloc(ZLIB_DFLTCC_BUF_SIZE,
+					  __GFP_NOMEMALLOC | __GFP_NORETRY |
+					  __GFP_NOWARN | GFP_NOIO);
 		workspace->buf_size = ZLIB_DFLTCC_BUF_SIZE;
 	}
 	if (!workspace->buf) {
-		workspace->buf = kmalloc(fs_info->sectorsize, GFP_KERNEL);
+		workspace->buf = kvmalloc(fs_info->sectorsize, GFP_KERNEL);
 		workspace->buf_size = fs_info->sectorsize;
 	}
 	if (!workspace->strm.workspace || !workspace->buf)
@@ -122,7 +122,6 @@ static int copy_data_into_buffer(struct address_space *mapping,
 
 	while (cur < filepos + length) {
 		struct folio *folio;
-		void *data_in;
 		unsigned int offset;
 		unsigned long copy_length;
 		int ret;
@@ -135,9 +134,8 @@ static int copy_data_into_buffer(struct address_space *mapping,
 		copy_length = min(folio_size(folio) - offset,
 				  filepos + length - cur);
 
-		data_in = kmap_local_folio(folio, offset);
-		memcpy(workspace->buf + cur - filepos, data_in, copy_length);
-		kunmap_local(data_in);
+		memcpy_from_folio(workspace->buf + cur - filepos, folio, offset,
+				  copy_length);
 		folio_put(folio);
 		cur += copy_length;
 	}

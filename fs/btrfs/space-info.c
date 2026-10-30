@@ -379,8 +379,7 @@ int btrfs_init_space_info(struct btrfs_fs_info *fs_info)
 	return ret;
 }
 
-void btrfs_add_bg_to_space_info(struct btrfs_fs_info *info,
-				struct btrfs_block_group *block_group)
+void btrfs_add_bg_to_space_info(struct btrfs_block_group *block_group)
 {
 	struct btrfs_space_info *space_info = block_group->space_info;
 	int factor, index;
@@ -403,8 +402,6 @@ void btrfs_add_bg_to_space_info(struct btrfs_fs_info *info,
 		space_info->full = false;
 	btrfs_try_granting_tickets(space_info);
 	spin_unlock(&space_info->lock);
-
-	block_group->space_info = space_info;
 
 	index = btrfs_bg_flags_to_raid_index(block_group->flags);
 	down_write(&space_info->groups_sem);
@@ -443,8 +440,8 @@ static u64 calc_effective_data_chunk_size(const struct btrfs_fs_info *fs_info)
 	 */
 	data_sinfo = btrfs_find_space_info(fs_info, BTRFS_BLOCK_GROUP_DATA);
 	if (btrfs_is_zoned(fs_info))
-		return data_sinfo->chunk_size;
-	data_chunk_size = min(data_sinfo->chunk_size,
+		return READ_ONCE(data_sinfo->chunk_size);
+	data_chunk_size = min(READ_ONCE(data_sinfo->chunk_size),
 			      mult_perc(fs_info->fs_devices->total_rw_bytes, 10));
 	return min_t(u64, data_chunk_size, SZ_1G);
 }
@@ -1704,7 +1701,6 @@ static int handle_reserve_ticket(struct btrfs_space_info *space_info,
 						evict_flush_states,
 						ARRAY_SIZE(evict_flush_states));
 		break;
-	case BTRFS_RESERVE_FLUSH_FREE_SPACE_INODE:
 	case BTRFS_RESERVE_FLUSH_ZONED_RELOCATION:
 		priority_reclaim_data_space(space_info, ticket);
 		break;
@@ -1968,7 +1964,6 @@ int btrfs_reserve_data_bytes(struct btrfs_space_info *space_info, u64 bytes,
 	int ret;
 
 	ASSERT(flush == BTRFS_RESERVE_FLUSH_DATA ||
-	       flush == BTRFS_RESERVE_FLUSH_FREE_SPACE_INODE ||
 	       flush == BTRFS_RESERVE_FLUSH_ZONED_RELOCATION ||
 	       flush == BTRFS_RESERVE_NO_FLUSH, "flush=%d", flush);
 	ASSERT(!current->journal_info || flush != BTRFS_RESERVE_FLUSH_DATA,
