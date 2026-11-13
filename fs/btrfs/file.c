@@ -2769,7 +2769,10 @@ static int btrfs_punch_hole(struct file *file, loff_t offset, loff_t len)
 	if (update_times)
 		inode_set_mtime_to_ts(inode, inode_set_ctime_current(inode));
 	ret = btrfs_update_inode(trans, BTRFS_I(inode));
-	updated_inode = true;
+	if (ret)
+		btrfs_abort_transaction(trans, ret);
+	else
+		updated_inode = true;
 	btrfs_end_transaction(trans);
 	btrfs_btree_balance_dirty(fs_info);
 out:
@@ -2794,6 +2797,8 @@ out_only_mutex:
 			int ret2;
 
 			ret = btrfs_update_inode(trans, BTRFS_I(inode));
+			if (ret)
+				btrfs_abort_transaction(trans, ret);
 			ret2 = btrfs_end_transaction(trans);
 			if (!ret)
 				ret = ret2;
