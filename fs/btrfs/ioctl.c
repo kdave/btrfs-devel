@@ -712,10 +712,8 @@ static noinline int create_subvol(const struct mnt_idmap *idmap,
 		btrfs_abort_transaction(trans, ret);
 		goto out;
 	}
-	/* anon_dev is owned by new_root now. */
-	anon_dev = 0;
 	BTRFS_I(new_inode_args.inode)->root = new_root;
-	/* ... and new_root is owned by new_inode_args.inode now. */
+	/* new_root is owned by new_inode_args.inode now. */
 
 	ret = btrfs_record_root_in_trans(trans, new_root);
 	if (unlikely(ret)) {
@@ -868,11 +866,7 @@ static int create_snapshot(struct btrfs_root *root, struct inode *dir,
 
 	d_instantiate(dentry, inode);
 	ret = 0;
-	pending_snapshot->anon_dev = 0;
 fail:
-	/* Prevent double freeing of anon_dev */
-	if (ret && pending_snapshot->snap)
-		pending_snapshot->snap->anon_dev = 0;
 	btrfs_put_root(pending_snapshot->snap);
 	btrfs_block_rsv_release(fs_info, block_rsv, (u64)-1, NULL);
 	if (qgroup_reserved)
@@ -2497,7 +2491,7 @@ static int btrfs_ioctl_defrag(struct file *file, void __user *argp)
 		 * running and allows defrag on files open in read-only mode.
 		 */
 		if (!capable(CAP_SYS_ADMIN) &&
-		    inode_permission(&nop_mnt_idmap, inode, MAY_WRITE)) {
+		    inode_permission(file_mnt_idmap(file), inode, MAY_WRITE)) {
 			ret = -EPERM;
 			goto out;
 		}
@@ -3310,6 +3304,7 @@ static long btrfs_ioctl_logical_to_ino(struct btrfs_fs_info *fs_info,
 	struct btrfs_ioctl_logical_ino_args AUTO_KFREE(loi);
 	struct btrfs_data_container AUTO_KVFREE(inodes);
 	bool ignore_offset;
+	bool search_commit_root;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -3320,6 +3315,7 @@ static long btrfs_ioctl_logical_to_ino(struct btrfs_fs_info *fs_info,
 
 	if (version == 1) {
 		ignore_offset = false;
+		search_commit_root = false;
 		size = min_t(u32, loi->size, SZ_64K);
 	} else {
 		/* All reserved bits must be 0 for now */
@@ -3327,10 +3323,12 @@ static long btrfs_ioctl_logical_to_ino(struct btrfs_fs_info *fs_info,
 			return -EINVAL;
 
 		/* Only accept flags we have defined so far */
-		if (loi->flags & ~(BTRFS_LOGICAL_INO_ARGS_IGNORE_OFFSET))
+		if (loi->flags & ~(BTRFS_LOGICAL_INO_ARGS_IGNORE_OFFSET |
+				   BTRFS_LOGICAL_INO_ARGS_COMMIT_ROOT))
 			return -EINVAL;
 
 		ignore_offset = loi->flags & BTRFS_LOGICAL_INO_ARGS_IGNORE_OFFSET;
+		search_commit_root = loi->flags & BTRFS_LOGICAL_INO_ARGS_COMMIT_ROOT;
 		size = min_t(u32, loi->size, SZ_16M);
 	}
 
@@ -3338,12 +3336,22 @@ static long btrfs_ioctl_logical_to_ino(struct btrfs_fs_info *fs_info,
 	if (IS_ERR(inodes))
 		return PTR_ERR(inodes);
 
-	ret = iterate_inodes_from_logical(loi->logical, fs_info, inodes, ignore_offset);
+	ret = iterate_inodes_from_logical(loi->logical, fs_info, inodes,
+					  ignore_offset, search_commit_root);
 	if (ret == -EINVAL)
 		return -ENOENT;
 	if (ret < 0)
 		return ret;
 
+	/*
+	 * Copy only what we found instead of the whole data container. If for
+	 * example 'size' is 16M and we found only 1 inode, it's wasteful to
+	 * copy 16M instead of sizeof(*inodes) + 1 * sizeof(u64)).
+	 * For each inode we find we add 3 elements to the inodes->val array:
+	 * inode number, offset and root ID.
+	 */
+	if (size > sizeof(*inodes))
+		size = sizeof(*inodes) + inodes->elem_cnt * sizeof(u64);
 	ret = copy_to_user((void __user *)(unsigned long)loi->inodes, inodes,
 			   size);
 	if (ret)

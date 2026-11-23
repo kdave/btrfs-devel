@@ -201,6 +201,7 @@ void btrfs_put_transaction(struct btrfs_transaction *transaction)
 			btrfs_put_block_group(cache);
 		}
 		WARN_ON(!list_empty(&transaction->dev_update_list));
+		WARN_ON(!list_empty(&transaction->dropped_roots));
 		kfree(transaction);
 	}
 }
@@ -725,6 +726,8 @@ start_transaction(struct btrfs_root *root, unsigned int num_items,
 			if (ret)
 				goto reserve_fail;
 			ret = btrfs_delayed_refs_rsv_refill(fs_info, flush);
+			if (ret == -EAGAIN)
+				ret = 0;
 		}
 
 		if (ret)
