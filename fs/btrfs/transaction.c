@@ -201,6 +201,7 @@ void btrfs_put_transaction(struct btrfs_transaction *transaction)
 			btrfs_put_block_group(cache);
 		}
 		WARN_ON(!list_empty(&transaction->dev_update_list));
+		WARN_ON(!list_empty(&transaction->dropped_roots));
 		kfree(transaction);
 	}
 }
@@ -725,6 +726,8 @@ start_transaction(struct btrfs_root *root, unsigned int num_items,
 			if (ret)
 				goto reserve_fail;
 			ret = btrfs_delayed_refs_rsv_refill(fs_info, flush);
+			if (ret == -EAGAIN)
+				ret = 0;
 		}
 
 		if (ret)
@@ -2124,12 +2127,7 @@ static void cleanup_transaction(struct btrfs_trans_handle *trans, int err)
 
 	spin_unlock(&fs_info->trans_lock);
 
-	btrfs_cleanup_one_transaction(trans->transaction);
-
-	spin_lock(&fs_info->trans_lock);
-	if (cur_trans == fs_info->running_transaction)
-		fs_info->running_transaction = NULL;
-	spin_unlock(&fs_info->trans_lock);
+	btrfs_cleanup_one_transaction(cur_trans);
 
 	if (trans->type & TRANS_SB_INTWRITER_MASK)
 		sb_end_intwrite(fs_info->sb);
@@ -2641,6 +2639,10 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans)
 		btrfs_clear_space_info_full(fs_info);
 
 	btrfs_set_last_trans_committed(fs_info, cur_trans->transid);
+
+	spin_lock(&fs_info->trans_lock);
+	list_del_init(&cur_trans->list);
+	spin_unlock(&fs_info->trans_lock);
 	/*
 	 * We needn't acquire the lock here because there is no other task
 	 * which can change it.
@@ -2649,10 +2651,6 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans)
 	trace_btrfs_transaction_commit(trans);
 	wake_up(&cur_trans->commit_wait);
 	btrfs_trans_state_lockdep_release(fs_info, BTRFS_LOCKDEP_TRANS_COMPLETED);
-
-	spin_lock(&fs_info->trans_lock);
-	list_del_init(&cur_trans->list);
-	spin_unlock(&fs_info->trans_lock);
 
 	btrfs_put_transaction(cur_trans);
 	btrfs_put_transaction(cur_trans);
