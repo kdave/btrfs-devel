@@ -905,8 +905,7 @@ ssize_t btrfs_direct_write(struct kiocb *iocb, struct iov_iter *from)
 	 * their ordered extent to finish IO before logging the new extent maps.
 	 */
 	if (iocb->ki_pos + iov_iter_count(from) <= i_size_read(inode) &&
-	    IS_NOSEC(inode) &&
-	    !iocb_is_dsync(iocb))
+	    IS_NOSEC(inode) && !iocb_is_dsync(iocb))
 		ilock_flags |= BTRFS_ILOCK_SHARED;
 
 relock:
